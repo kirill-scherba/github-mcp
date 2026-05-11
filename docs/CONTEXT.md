@@ -15,7 +15,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 
 ## Repository
 
-- **URL:** https://github.com/kirill-scherba/github-mcp
+- **URL:** <https://github.com/kirill-scherba/github-mcp>
 - **Language:** Perl (single file: `github-mcp.pl`)
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
@@ -23,9 +23,9 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 ## Tools (12)
 
 | # | Tool | Purpose |
-|---|------|---------|
+| --- | ------ | --------- |
 | 1 | `github_issue_create` | Create issue |
-| 2 | `github_issue_list` | List issues |
+| 2 | `github_issue_list` | List issues — supports single repo (string) or multiple repos (array) |
 | 3 | `github_issue_get` | Get issue details |
 | 4 | `github_issue_update` | Update issue |
 | 5 | `github_issue_add_comment` | Add comment |
@@ -42,3 +42,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-09:** Extracted from ai-hub commit `3e366ce`. Created as standalone repo with `github-mcp.pl`.
 - **2026-05-09:** Removed GitHub tools from ai-hub (commit `b0bce45`).
 - **2026-05-09:** Added README.md, docs/, .gitignore.
+- **2026-05-11:** `github_issue_list` now accepts array of repos — single call across all projects.

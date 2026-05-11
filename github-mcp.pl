@@ -157,7 +157,7 @@ sub tool_github_issue_create {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
-# 2. github_issue_list
+# 2. github_issue_list - single or multiple repositories
 sub tool_github_issue_list {
     my ($args) = @_;
     my $owner  = $args->{owner}  or die "Missing required: owner";
@@ -166,26 +166,34 @@ sub tool_github_issue_list {
     my $labels = $args->{labels} // undef;
     my $limit  = $args->{limit}  // 30;
 
-    my $path = "/repos/$owner/$repo/issues?state=$state&per_page=$limit&sort=created&direction=desc";
-    $path .= "&labels=" . join(",", ref $labels ? @$labels : ($labels)) if $labels;
+    # Normalize repo to an array (single string or array ref)
+    my @repos = ref $repo eq 'ARRAY' ? @$repo : ($repo);
 
-    my $res = _github_api("GET", $path);
-    if ($res->{success}) {
-        my @issues;
+    my @all_issues;
+    REPO: for my $r (@repos) {
+        my $path = "/repos/$owner/$r/issues?state=$state&per_page=$limit&sort=created&direction=desc";
+        $path .= "&labels=" . join(",", ref $labels ? @$labels : ($labels)) if $labels;
+
+        my $res = _github_api("GET", $path);
+        unless ($res->{success}) {
+            log_message("WARN", "github_issue_list: error for $owner/$r: " . ($res->{reason} // "HTTP $res->{status}"));
+            next REPO;
+        }
+
         for my $issue (@{$res->{data} // []}) {
-            push @issues, {
+            push @all_issues, {
                 number     => $issue->{number},
                 title      => $issue->{title},
                 state      => $issue->{state},
                 url        => $issue->{html_url},
                 labels     => [map { $_->{name} } @{$issue->{labels} // []}],
+                repo       => $r,
                 created_at => $issue->{created_at},
                 updated_at => $issue->{updated_at},
             };
         }
-        return { issues => \@issues, count => scalar @issues };
     }
-    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+    return { issues => \@all_issues, count => scalar @all_issues };
 }
 
 # 3. github_issue_get
@@ -496,17 +504,20 @@ my %tool_handlers = (
         },
     },
     github_issue_list => {
-        description => "List GitHub issues in a repository with optional filters",
+        description => "List GitHub issues in repositories with optional filters. Accept single repo (string) or multiple repos (array).",
         handler     => \&tool_github_issue_list,
         inputSchema => {
             type => "object",
             required => ["owner", "repo"],
             properties => {
                 owner  => { type => "string", description => "Repository owner (user or org)" },
-                repo   => { type => "string", description => "Repository name" },
+                repo   => { oneOf => [
+                    { type => "string", description => "Single repository name" },
+                    { type => "array",  items => { type => "string" }, description => "Array of repository names" },
+                ], description => "Repository name, or array of repository names" },
                 state  => { type => "string", description => "Issue state: open, closed, all (default: open)" },
                 labels => { type => "string", description => "Comma-separated label names (optional)" },
-                limit  => { type => "number", description => "Max results (default: 30)" },
+                limit  => { type => "number", description => "Max results per repo (default: 30)" },
             },
         },
     },

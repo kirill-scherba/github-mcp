@@ -10,7 +10,7 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 
 ## Features
 
-- **12 GitHub API tools** — issues (CRUD + comments + list), files (get, create/update), search (issues, code), labels (list), repositories (list)
+- **12 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), files (get, create/update), search (issues, code), labels (list), repositories (list)
 - **Direct authentication** — `GITHUB_TOKEN` from environment variable, no Safe sandbox limitations
 - **Clean JSON-RPC 2.0** — MCP protocol over stdin/stdout
 - **Structured logging** — all logs to stderr, stdout clean for JSON-RPC
@@ -19,9 +19,9 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 ## Tools
 
 | Tool | Description |
-|------|-------------|
+| ------ | ------------- |
 | `github_issue_create` | Create a new issue |
-| `github_issue_list` | List issues with filters |
+| `github_issue_list` | List issues with filters — supports single repo (string) or multiple repos (array) |
 | `github_issue_get` | Get issue details |
 | `github_issue_update` | Update issue (title, body, state, labels, assignees) |
 | `github_issue_add_comment` | Add a comment to an issue |
@@ -94,10 +94,21 @@ export GITHUB_TOKEN="github_pat_..."
 
 ### List Issues
 
+Single repository:
 ```json
 {
   "owner": "kirill-scherba",
   "repo": "memory-store-mcp",
+  "state": "open",
+  "limit": 10
+}
+```
+
+Multiple repositories — one call across all projects (includes `repo` field in each result):
+```json
+{
+  "owner": "kirill-scherba",
+  "repo": ["memory-store-mcp", "ai-hub", "rag-mcp", "sqlh", "web-search-mcp"],
   "state": "open",
   "limit": 10
 }
@@ -144,7 +155,7 @@ export GITHUB_TOKEN="github_pat_..."
 
 ## Architecture
 
-```
+```txt
 ┌──────────────────────────────────────────────────────────┐
 │                      MCP Client (AI)                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
@@ -185,7 +196,7 @@ export GITHUB_TOKEN="github_pat_..."
 This server implements the **Model Context Protocol (MCP)** using **JSON-RPC 2.0** over stdin/stdout.
 
 | Method | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `initialize` | Handshake with protocol version and capabilities |
 | `ping` | Health check |
 | `tools/list` | Returns all 12 tool definitions with JSON Schema |

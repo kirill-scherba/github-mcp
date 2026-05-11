@@ -2,7 +2,7 @@
 
 ## Architecture
 
-```
+```txt
 ┌─────────────┐     JSON-RPC 2.0      ┌──────────────────┐     curl HTTP     ┌─────────────┐
 │  MCP Client  │ ◄───── stdin/stdout ──► │  github-mcp.pl   │ ◄────── API ─────► │ GitHub REST │
 │     (AI)     │                        │  (Perl)          │                  │   API       │
@@ -25,6 +25,7 @@
 ### 2. Direct curl for GitHub API
 
 Unlike ai-hub which used Safe sandbox + `_github_api` wrapper, this version:
+
 - Calls `curl` directly from shell for each request
 - No Perl module for HTTP (zero additional CPAN deps)
 - `GITHUB_TOKEN` passed via `-H 'Authorization: Bearer ...'`
@@ -46,12 +47,14 @@ Stderr is clean — stdout reserved for JSON-RPC responses.
 ### 5. MCP Protocol
 
 Implements:
+
 - `initialize` — returns protocol version + server capabilities
 - `ping` — health check
 - `tools/list` — returns all 12 tool definitions with JSON Schema
 - `tools/call` — dispatches to tool handler, catches errors
 
 Error handling:
+
 - Unknown method → `-32601` (Method not found)
 - Tool execution error → `-32603` (Internal error)
 - Missing required args → Perl `die` caught by eval
@@ -59,17 +62,29 @@ Error handling:
 ### 6. Tool Registration
 
 Tools defined in `%tool_handlers` hash:
+
 - Key: tool name (e.g. `github_issue_create`)
 - Value: `{ description, handler => \&sub, inputSchema => { ... } }`
 
 This makes adding a new tool a matter of:
+
 1. Write the handler subroutine
 2. Add entry to `%tool_handlers`
+
+### 7. Multi-repo Support in github_issue_list
+
+The `repo` parameter accepts either a single string or an array of repository names:
+
+- **String** → single repo query (backward compatible)
+- **Array** → iterates over all repos, collects issues from each, adds `repo` field per issue
+
+Array mode handles per-repo errors gracefully — if one repo fails (e.g. doesn't exist), it logs the error and continues with the remaining repos. `inputSchema` uses `oneOf` to declare both types for MCP client compatibility.
 
 ## Data Flow
 
 ### Issue Creation
-```
+
+```txt
 tools/call → github_issue_create(args)
   → validate required params (owner, repo, title)
   → JSON-encode payload
@@ -80,7 +95,8 @@ tools/call → github_issue_create(args)
 ```
 
 ### File Retrieval
-```
+
+```txt
 tools/call → github_get_file(args)
   → _github_api("GET", "/repos/o/r/contents/path?ref=...")
   → decode base64 content
