@@ -671,8 +671,6 @@ my %tool_handlers = (
 
 log_message("INFO", "github-mcp server started");
 
-# Notify the client that we are ready
-send_notification("initialized");
 
 LINE: while (my $line = <STDIN>) {
     chomp $line;
@@ -752,10 +750,17 @@ LINE: while (my $line = <STDIN>) {
             respond_error($id, -32603, "Internal error: $error_msg");
         }
     }
+    elsif ($method eq "resources/list") {
+        respond($id, { resources => [] });
+        log_message("INFO", "Sent empty resource list");
+    }
+    elsif ($method eq "prompts/list") {
+        respond($id, { prompts => [] });
+        log_message("INFO", "Sent empty prompt list");
+    }
     else {
         log_message("WARN", "Unknown method: $method");
         respond_error($id, -32601, "Method not found: $method");
     }
 }
 
-log_message("INFO", "github-mcp server stopped");
