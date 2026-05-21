@@ -110,6 +110,18 @@ tools/call → github_get_file(args)
 - curl called with `--connect-timeout 10 --max-time 30`
 - Temporary files for POST bodies cleaned up in `unlink`
 
+### 8. GraphQL API for Projects V2
+
+A second helper `_github_graphql($query, $variables)` was added to support GitHub Projects V2 (and any other GraphQL-only GitHub APIs). It differs from `_github_api` (REST):
+
+- Single endpoint: `POST https://api.github.com/graphql`
+- Body is always JSON-encoded `{query, variables}`
+- Response parsed for `data` **and** `errors` — GraphQL errors return HTTP 200 but contain `errors` array
+- Uses same `GITHUB_TOKEN`
+- Also uses temp file for body (same cleanup pattern)
+
+All Projects V2 tools (9 new) use `_github_graphql`. One tool (`github_project_update_item`) uses `JSON::true`/`JSON::false` for boolean fields since GraphQL expects native booleans, not strings.
+
 ## Future Considerations
 
 - Add `github_create_repository` tool
@@ -117,3 +129,6 @@ tools/call → github_get_file(args)
 - Add rate limit checking (X-RateLimit-Remaining header)
 - Add pagination support for list operations
 - Add branch protection API tools
+- Add `github_project_remove_item` tool (deletes item from project)
+- Add `github_project_create_draft_issue` tool
+- Add `github_project_create_status_update` tool

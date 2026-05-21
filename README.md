@@ -4,13 +4,13 @@
 [![MCP](https://img.shields.io/badge/MCP-2024--11--05-green.svg)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
-> **Standalone MCP server for GitHub API — 12 tools for issues, files, search, labels, and repositories.**
+> **Standalone MCP server for GitHub API — 21 tools for issues, files, search, labels, repositories, and projects.**
 
 Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated MCP server for better separation of concerns. Uses direct `GITHUB_TOKEN` from environment — no sandbox limitations, full GitHub API access.
 
 ## Features
 
-- **12 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), files (get, create/update), search (issues, code), labels (list), repositories (list)
+- **21 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), files (get, create/update), search (issues, code), labels (list), repositories (list), projects V2 (list, get, create, update, delete, fields, items, add item, update item)
 - **Direct authentication** — `GITHUB_TOKEN` from environment variable, no Safe sandbox limitations
 - **Clean JSON-RPC 2.0** — MCP protocol over stdin/stdout
 - **Structured logging** — all logs to stderr, stdout clean for JSON-RPC
@@ -32,6 +32,34 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 | `github_search_code` | Search code across repositories |
 | `github_list_labels` | List labels in a repository |
 | `github_list_repos` | List repositories for a user or org |
+
+### List GitHub Projects V2
+
+```json
+{
+  "owner": "kirill-scherba",
+  "owner_type": "auto",
+  "limit": 5
+}
+```
+
+### Get Project V2
+
+```json
+{
+  "owner": "kirill-scherba",
+  "number": 1
+}
+```
+
+### Add an Issue to a Project V2
+
+```json
+{
+  "project_id": "PVT_lADONn5s84ACbL0",
+  "content_id": "I_kwDONn5s84ACbL0"
+}
+```
 
 ## Installation
 

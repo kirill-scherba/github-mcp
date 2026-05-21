@@ -76,7 +76,7 @@ sub send_notification {
 our $json_pp_decoder = JSON->new->allow_nonref;
 
 # ---------------------------------------------------------------------------
-# GitHub API helper
+# GitHub API helpers
 # ---------------------------------------------------------------------------
 # Calls GitHub REST API, returns { success, status, data, reason }.
 # Auth from $GITHUB_TOKEN (environment variable).
@@ -121,6 +121,43 @@ sub _github_api {
     }
 
     return { success => ($http_code =~ /^2/ ? 1 : 0), status => $http_code, data => $data };
+}
+
+# ---------------------------------------------------------------------------
+# Calls GitHub GraphQL API, returns { success, data, errors, reason }.
+# ---------------------------------------------------------------------------
+sub _github_graphql {
+    my ($query, $variables) = @_;
+    my $token = $GITHUB_TOKEN;
+    my $url = 'https://api.github.com/graphql';
+
+    log_message("DEBUG", "_github_graphql: GraphQL query (len=" . length($query) . ")");
+
+    my $payload = { query => $query };
+    $payload->{variables} = $variables if $variables;
+    my $body = $json->encode($payload);
+
+    my $tmp = "/tmp/_github_gql_body_$$.json";
+    open(my $fh, '>', $tmp) or return { success => 0, reason => "Cannot write temp file: $!" };
+    print $fh $body;
+    close $fh;
+
+    my $cmd = "curl -s -X POST -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -H 'User-Agent: github-mcp/1.0' --connect-timeout 10 --max-time 30 --data-binary \@'$tmp' '$url' 2>/dev/null";
+    my $result = `$cmd`;
+    unlink $tmp if -f $tmp;
+
+    my $data = eval { $json_pp_decoder->decode($result) };
+    if ($@) {
+        return { success => 0, reason => "GraphQL response decode error: $@" };
+    }
+
+    if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
+        my @messages = map { $_->{message} } @{$data->{errors}};
+        return { success => 0, errors => $data->{errors}, reason => "GraphQL error: " . join("; ", @messages) };
+    }
+
+    log_message("DEBUG", "_github_graphql: success");
+    return { success => 1, data => $data->{data} };
 }
 
 # ---------------------------------------------------------------------------
@@ -483,6 +520,403 @@ sub tool_github_list_repos {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
+# ============================================================================
+# GitHub Projects V2 Tools (GraphQL API)
+# ============================================================================
+
+# Helper: resolve owner login to type and node ID
+sub _resolve_owner {
+    my ($owner) = @_;
+    # Try organization first
+    my $res = _github_graphql(
+        'query($login: String!) { organization(login: $login) { id } }',
+        { login => $owner }
+    );
+    if ($res->{success} && $res->{data}{organization}{id}) {
+        return ('organization', $res->{data}{organization}{id});
+    }
+    # Try user
+    $res = _github_graphql(
+        'query($login: String!) { user(login: $login) { id } }',
+        { login => $owner }
+    );
+    if ($res->{success} && $res->{data}{user}{id}) {
+        return ('user', $res->{data}{user}{id});
+    }
+    die "Could not resolve owner '$owner' to a user or organization";
+}
+
+# 13. github_project_list — List GitHub Projects V2 for user or organization
+sub tool_github_project_list {
+    my ($args) = @_;
+    my $owner  = $args->{owner}       or die "Missing required: owner";
+    my $limit  = $args->{limit}       // 10;
+    my $type   = $args->{owner_type}  // 'auto';  # user, org, auto
+
+    my $field = '';
+    if ($type eq 'auto') {
+        (my $t, undef) = _resolve_owner($owner);
+        $field = $t;
+    } elsif ($type eq 'org') {
+        $field = 'organization';
+    } elsif ($type eq 'user') {
+        $field = 'user';
+    } else {
+        die "Invalid owner_type '$type' (expected 'user', 'org', or 'auto')";
+    }
+
+    my $query = qq{
+        query(\$owner: String!, \$limit: Int!) {
+            $field(login: \$owner) {
+                projectsV2(first: \$limit) {
+                    nodes {
+                        id
+                        number
+                        title
+                        url
+                        public
+                        closed
+                        createdAt
+                        updatedAt
+                        creator { login }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, { owner => $owner, limit => $limit });
+    if ($res->{success}) {
+        my $projects = $res->{data}{$field}{projectsV2}{nodes} // [];
+        return { owner_type => $field, projects => $projects, count => scalar @$projects };
+    }
+    die "GraphQL error: " . ($res->{reason} // 'unknown');
+}
+
+# 14. github_project_get — Get details of a specific GitHub Project V2
+sub tool_github_project_get {
+    my ($args) = @_;
+    my $owner  = $args->{owner}       or die "Missing required: owner";
+    my $number = $args->{number}      or die "Missing required: number";
+    my $type   = $args->{owner_type}  // 'auto';
+
+    my $field = '';
+    if ($type eq 'auto') {
+        (my $t, undef) = _resolve_owner($owner);
+        $field = $t;
+    } elsif ($type eq 'org') {
+        $field = 'organization';
+    } elsif ($type eq 'user') {
+        $field = 'user';
+    } else {
+        die "Invalid owner_type '$type'";
+    }
+
+    my $query = qq{
+        query(\$owner: String!, \$number: Int!) {
+            $field(login: \$owner) {
+                projectV2(number: \$number) {
+                    id
+                    number
+                    title
+                    url
+                    shortDescription
+                    readme
+                    public
+                    closed
+                    createdAt
+                    updatedAt
+                    creator { login }
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, { owner => $owner, number => $number });
+    if ($res->{success} && $res->{data}{$field}{projectV2}) {
+        return $res->{data}{$field}{projectV2};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Project not found');
+}
+
+# 15. github_project_create — Create a new GitHub Project V2
+sub tool_github_project_create {
+    my ($args) = @_;
+    my $owner   = $args->{owner}  or die "Missing required: owner";
+    my $title   = $args->{title}  or die "Missing required: title";
+    my $body    = $args->{body}   // '';
+
+    my $owner_type = '';
+    my $owner_id   = '';
+    ($owner_type, $owner_id) = _resolve_owner($owner);
+
+    my $query = <<'EOF';
+    mutation($ownerId: ID!, $title: String!, $body: String) {
+        createProjectV2(input: {ownerId: $ownerId, title: $title, body: $body}) {
+            projectV2 {
+                id
+                number
+                title
+                url
+                public
+                closed
+                createdAt
+                updatedAt
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { ownerId => $owner_id, title => $title, body => $body });
+    if ($res->{success} && $res->{data}{createProjectV2}{projectV2}) {
+        return $res->{data}{createProjectV2}{projectV2};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to create project');
+}
+
+# 16. github_project_update — Update a GitHub Project V2
+sub tool_github_project_update {
+    my ($args) = @_;
+    my $project_id = $args->{project_id}  or die "Missing required: project_id";
+
+    my %updatable = ();
+    $updatable{title}   = $args->{title}  if defined $args->{title};
+    $updatable{public}  = $args->{public} ? JSON::true : JSON::false if defined $args->{public};
+    $updatable{closed}  = $args->{closed} ? JSON::true : JSON::false if defined $args->{closed};
+    $updatable{readme}  = $args->{readme}  if defined $args->{readme};
+    $updatable{shortDescription} = $args->{description} if defined $args->{description};
+
+    die "Nothing to update" unless keys %updatable;
+
+    # Build the update payload inline since _github_graphql JSON-encodes variables
+    $updatable{projectId} = $project_id;
+
+    my $query = <<'EOF';
+    mutation($input: UpdateProjectV2Input!) {
+        updateProjectV2(input: $input) {
+            projectV2 {
+                id
+                number
+                title
+                url
+                public
+                closed
+                shortDescription
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { input => \%updatable });
+    if ($res->{success} && $res->{data}{updateProjectV2}{projectV2}) {
+        return $res->{data}{updateProjectV2}{projectV2};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to update project');
+}
+
+# 17. github_project_delete — Delete a GitHub Project V2
+sub tool_github_project_delete {
+    my ($args) = @_;
+    my $project_id = $args->{project_id} or die "Missing required: project_id";
+
+    my $query = <<'EOF';
+    mutation($projectId: ID!) {
+        deleteProjectV2(input: {projectId: $projectId}) {
+            projectV2 { id }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { projectId => $project_id });
+    if ($res->{success} && $res->{data}{deleteProjectV2}{projectV2}) {
+        return { deleted => JSON::true, project_id => $project_id };
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to delete project');
+}
+
+# 18. github_project_list_fields — List fields in a GitHub Project V2
+sub tool_github_project_list_fields {
+    my ($args) = @_;
+    my $owner   = $args->{owner}       or die "Missing required: owner";
+    my $number  = $args->{number}      or die "Missing required: number";
+    my $limit   = $args->{limit}       // 50;
+    my $type    = $args->{owner_type}  // 'auto';
+
+    my $field = '';
+    if ($type eq 'auto') {
+        (my $t, undef) = _resolve_owner($owner);
+        $field = $t;
+    } elsif ($type eq 'org') {
+        $field = 'organization';
+    } elsif ($type eq 'user') {
+        $field = 'user';
+    } else {
+        die "Invalid owner_type '$type'";
+    }
+
+    my $query = qq{
+        query(\$owner: String!, \$number: Int!, \$limit: Int!) {
+            $field(login: \$owner) {
+                projectV2(number: \$number) {
+                    fields(first: \$limit) {
+                        nodes {
+                            ... on ProjectV2Field { __typename id name dataType }
+                            ... on ProjectV2SingleSelectField { __typename id name dataType options { id name color } }
+                            ... on ProjectV2IterationField { __typename id name dataType configuration { iterations { id title startDate duration } } }
+                            ... on ProjectV2DateField { __typename id name dataType }
+                            ... on ProjectV2NumberField { __typename id name dataType }
+                        }
+                        pageInfo { hasNextPage endCursor }
+                    }
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, { owner => $owner, number => $number, limit => $limit });
+    if ($res->{success} && $res->{data}{$field}{projectV2}) {
+        my $fields = $res->{data}{$field}{projectV2}{fields}{nodes} // [];
+        return { fields => $fields, count => scalar @$fields };
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to list fields');
+}
+
+# 19. github_project_list_items — List items in a GitHub Project V2
+sub tool_github_project_list_items {
+    my ($args) = @_;
+    my $owner   = $args->{owner}       or die "Missing required: owner";
+    my $number  = $args->{number}      or die "Missing required: number";
+    my $limit   = $args->{limit}       // 20;
+    my $type    = $args->{owner_type}  // 'auto';
+
+    my $field = '';
+    if ($type eq 'auto') {
+        (my $t, undef) = _resolve_owner($owner);
+        $field = $t;
+    } elsif ($type eq 'org') {
+        $field = 'organization';
+    } elsif ($type eq 'user') {
+        $field = 'user';
+    } else {
+        die "Invalid owner_type '$type'";
+    }
+
+    my $query = qq{
+        query(\$owner: String!, \$number: Int!, \$limit: Int!) {
+            $field(login: \$owner) {
+                projectV2(number: \$number) {
+                    items(first: \$limit) {
+                        nodes {
+                            id
+                            content {
+                                ... on Issue { __typename title number state url repository { full_name } }
+                                ... on PullRequest { __typename title number state url repository { full_name } }
+                                ... on DraftIssue { __typename title body }
+                            }
+                            fieldValues(first: 8) {
+                                nodes {
+                                    ... on ProjectV2ItemFieldTextValue { field { ... on ProjectV2FieldCommon { id name } } text }
+                                    ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2FieldCommon { id name } } option { name color } }
+                                    ... on ProjectV2ItemFieldNumberValue { field { ... on ProjectV2FieldCommon { id name } } number }
+                                    ... on ProjectV2ItemFieldDateValue { field { ... on ProjectV2FieldCommon { id name } } date }
+                                    ... on ProjectV2ItemFieldIterationValue { field { ... on ProjectV2FieldCommon { id name } } iteration { id title startDate } }
+                                }
+                            }
+                        }
+                        pageInfo { hasNextPage endCursor }
+                    }
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, { owner => $owner, number => $number, limit => $limit });
+    if ($res->{success} && $res->{data}{$field}{projectV2}) {
+        my $items = $res->{data}{$field}{projectV2}{items}{nodes} // [];
+        return { items => $items, count => scalar @$items };
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to list items');
+}
+
+# 20. github_project_add_item — Add an issue or PR to a GitHub Project V2
+sub tool_github_project_add_item {
+    my ($args) = @_;
+    my $project_id  = $args->{project_id}  or die "Missing required: project_id";
+    my $content_id  = $args->{content_id}  or die "Missing required: content_id";
+
+    my $query = <<'EOF';
+    mutation($projectId: ID!, $contentId: ID!) {
+        addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+            item {
+                id
+                content {
+                    ... on Issue { title number }
+                    ... on PullRequest { title number }
+                    ... on DraftIssue { title }
+                }
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { projectId => $project_id, contentId => $content_id });
+    if ($res->{success} && $res->{data}{addProjectV2ItemById}{item}) {
+        return $res->{data}{addProjectV2ItemById}{item};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to add item');
+}
+
+# 21. github_project_update_item — Update a field value on a project item
+sub tool_github_project_update_item {
+    my ($args) = @_;
+    my $project_id  = $args->{project_id}  or die "Missing required: project_id";
+    my $item_id     = $args->{item_id}     or die "Missing required: item_id";
+    my $field_id    = $args->{field_id}    or die "Missing required: field_id";
+    my $value       = $args->{value}       // undef;
+    my $number      = $args->{number}      // undef;
+    my $text        = $args->{text}        // undef;
+    my $date        = $args->{date}        // undef;
+    my $option_id   = $args->{option_id}   // undef;
+    my $iteration_id = $args->{iteration_id} // undef;
+
+    # Build the value object based on what the user provided
+    my %value_obj = ();
+    if (defined $value) {
+        # Try to infer type
+        if ($value =~ /^\d+$/) {
+            $value_obj{number} = int($value);
+        } elsif ($value =~ /^\d{4}-\d{2}-\d{2}$/) {
+            $value_obj{date} = $value;
+        } else {
+            $value_obj{text} = $value;
+        }
+    } else {
+        $value_obj{number} = int($number) if defined $number;
+        $value_obj{text}   = $text        if defined $text;
+        $value_obj{date}   = $date        if defined $date;
+        $value_obj{singleSelectOptionId} = $option_id if defined $option_id;
+        $value_obj{iterationId} = $iteration_id if defined $iteration_id;
+    }
+
+    die "Nothing to update (provide value, number, text, date, option_id, or iteration_id)" unless keys %value_obj;
+
+    my $query = <<'EOF';
+    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+        updateProjectV2ItemFieldValue(
+            input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value }
+        ) {
+            projectV2Item {
+                id
+                fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { option { name } } }
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, {
+        projectId => $project_id,
+        itemId    => $item_id,
+        fieldId   => $field_id,
+        value     => \%value_obj,
+    });
+    if ($res->{success} && $res->{data}{updateProjectV2ItemFieldValue}{projectV2Item}) {
+        return $res->{data}{updateProjectV2ItemFieldValue}{projectV2Item};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to update item');
+}
+
 # ---------------------------------------------------------------------------
 # Tool definitions for tools/list
 # ---------------------------------------------------------------------------
@@ -660,6 +1094,134 @@ my %tool_handlers = (
                 type  => { type => "string", description => "Type: owner, public, private, all (default: owner)" },
                 org   => { type => "string", description => "Organization name (optional, omit for user repos)" },
                 limit => { type => "number", description => "Max results (default: 30)" },
+            },
+        },
+    },
+
+    # === GitHub Projects V2 (GraphQL) ===
+
+    github_project_list => {
+        description => "List GitHub Projects V2 for a user or organization",
+        handler     => \&tool_github_project_list,
+        inputSchema => {
+            type => "object",
+            required => ["owner"],
+            properties => {
+                owner       => { type => "string", description => "User or organization login" },
+                owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
+                limit       => { type => "number", description => "Max projects to list (default: 10)" },
+            },
+        },
+    },
+    github_project_get => {
+        description => "Get details of a GitHub Project V2",
+        handler     => \&tool_github_project_get,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "number"],
+            properties => {
+                owner       => { type => "string", description => "User or organization login" },
+                number      => { type => "number", description => "Project number" },
+                owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
+            },
+        },
+    },
+    github_project_create => {
+        description => "Create a new GitHub Project V2",
+        handler     => \&tool_github_project_create,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "title"],
+            properties => {
+                owner  => { type => "string", description => "User or organization to create project for" },
+                title  => { type => "string", description => "Project title" },
+                body   => { type => "string", description => "Project description / README (optional)" },
+            },
+        },
+    },
+    github_project_update => {
+        description => "Update a GitHub Project V2",
+        handler     => \&tool_github_project_update,
+        inputSchema => {
+            type => "object",
+            required => ["project_id"],
+            properties => {
+                project_id  => { type => "string", description => "GraphQL node ID of the project" },
+                title       => { type => "string", description => "New title (optional)" },
+                description => { type => "string", description => "Short description (optional)" },
+                public      => { type => "boolean", description => "Make project public (optional)" },
+                closed      => { type => "boolean", description => "Close project (optional)" },
+                readme      => { type => "string", description => "Project body / readme content (optional)" },
+            },
+        },
+    },
+    github_project_delete => {
+        description => "Delete a GitHub Project V2",
+        handler     => \&tool_github_project_delete,
+        inputSchema => {
+            type => "object",
+            required => ["project_id"],
+            properties => {
+                project_id  => { type => "string", description => "GraphQL node ID of the project" },
+            },
+        },
+    },
+    github_project_list_fields => {
+        description => "List fields (columns) in a GitHub Project V2",
+        handler     => \&tool_github_project_list_fields,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "number"],
+            properties => {
+                owner       => { type => "string", description => "User or organization login" },
+                number      => { type => "number", description => "Project number" },
+                owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
+                limit       => { type => "number", description => "Max fields to list (default: 50)" },
+            },
+        },
+    },
+    github_project_list_items => {
+        description => "List items (issues, PRs, draft issues) in a GitHub Project V2",
+        handler     => \&tool_github_project_list_items,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "number"],
+            properties => {
+                owner       => { type => "string", description => "User or organization login" },
+                number      => { type => "number", description => "Project number" },
+                owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
+                limit       => { type => "number", description => "Max items to list (default: 20)" },
+            },
+        },
+    },
+    github_project_add_item => {
+        description => "Add an existing issue, PR, or draft issue to a GitHub Project V2",
+        handler     => \&tool_github_project_add_item,
+        inputSchema => {
+            type => "object",
+            required => ["project_id", "content_id"],
+            properties => {
+                project_id  => { type => "string", description => "GraphQL node ID of the project (use github_project_get)" },
+                content_id  => { type => "string", description => "GraphQL node ID of the issue/PR/draft to add" },
+            },
+        },
+    },
+    github_project_update_item => {
+        description => "Update a field value on a GitHub Project V2 item",
+        handler     => \&tool_github_project_update_item,
+        inputSchema => {
+            type => "object",
+            required => ["project_id", "item_id", "field_id"],
+            properties => {
+                project_id    => { type => "string", description => "GraphQL node ID of the project" },
+                item_id       => { type => "string", description => "GraphQL node ID of the item" },
+                field_id      => { type => "string", description => "GraphQL node ID of the field" },
+                value         => { type => "string", description => "Value to set (auto-detected type: number, date, or text)" },
+                number        => { type => "number", description => "Numeric value (overrides value)" },
+                text          => { type => "string", description => "Text value (overrides value)" },
+                date          => { type => "string", description => "Date value YYYY-MM-DD (overrides value)" },
+                option_id     => { type => "string", description => "Single select option ID (overrides value)" },
+                iteration_id  => { type => "string", description => "Iteration ID (overrides value)" },
             },
         },
     },

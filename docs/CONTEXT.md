@@ -20,7 +20,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
 
-## Tools (12)
+## Tools (21)
 
 | # | Tool | Purpose |
 | --- | ------ | --------- |
@@ -36,6 +36,15 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 10 | `github_search_code` | Search code |
 | 11 | `github_list_labels` | List labels |
 | 12 | `github_list_repos` | List repos |
+| 13 | `github_project_list` | List GitHub Projects V2 for user/org |
+| 14 | `github_project_get` | Get Project V2 details |
+| 15 | `github_project_create` | Create Project V2 |
+| 16 | `github_project_update` | Update Project V2 settings |
+| 17 | `github_project_delete` | Delete Project V2 |
+| 18 | `github_project_list_fields` | List fields in a Project V2 |
+| 19 | `github_project_list_items` | List items (issues/PRs) in a Project V2 |
+| 20 | `github_project_add_item` | Add existing issue/PR to a Project V2 |
+| 21 | `github_project_update_item` | Update field value on a Project V2 item |
 
 ## History
 
@@ -43,3 +52,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-09:** Removed GitHub tools from ai-hub (commit `b0bce45`).
 - **2026-05-09:** Added README.md, docs/, .gitignore.
 - **2026-05-11:** `github_issue_list` now accepts array of repos — single call across all projects.
+- **2026-05-21:** Added GitHub Projects V2 support (9 new tools via GraphQL API).
