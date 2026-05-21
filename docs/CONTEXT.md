@@ -2,7 +2,7 @@
 
 ## What is github-mcp?
 
-PostgreSQL MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 12 GitHub API tools via MCP protocol.
+GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 21 GitHub API tools (12 REST + 9 GraphQL) via MCP protocol.
 
 ## Why it exists
 
@@ -53,3 +53,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-09:** Added README.md, docs/, .gitignore.
 - **2026-05-11:** `github_issue_list` now accepts array of repos — single call across all projects.
 - **2026-05-21:** Added GitHub Projects V2 support (9 new tools via GraphQL API).
+- **2026-05-21:** Discovered GITHUB_TOKEN lacks `read:project` scope — Projects V2 tools blocked until token is regenerated with `read:project` + `write:project`.

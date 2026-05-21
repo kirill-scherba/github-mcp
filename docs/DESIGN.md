@@ -3,14 +3,15 @@
 ## Architecture
 
 ```txt
-┌─────────────┐     JSON-RPC 2.0      ┌──────────────────┐     curl HTTP     ┌─────────────┐
-│  MCP Client  │ ◄───── stdin/stdout ──► │  github-mcp.pl   │ ◄────── API ─────► │ GitHub REST │
-│     (AI)     │                        │  (Perl)          │                  │   API       │
-└─────────────┘                        │                  │                  └─────────────┘
-                                        │  while (<STDIN>) │
-                                        │  dispatch → tool │
-                                        │  _github_api()   │
-                                        └──────────────────┘
+┌─────────────┐     JSON-RPC 2.0      ┌──────────────────┐     curl HTTP      ┌─────────────┐
+│  MCP Client  │ ◄───── stdin/stdout ──► │  github-mcp.pl   │ ◄──── REST ──────► │ GitHub REST │
+│     (AI)     │                        │  (Perl)          │                   │   API       │
+└─────────────┘                        │                  │                   └─────────────┘
+                                        │  while (<STDIN>) │                        │
+                                        │  dispatch → tool │                        │
+                                        │  _github_api()   │                   ┌─────▼─────────┐
+                                        │  _github_graphql()│ ◄─── GraphQL ───► │ GitHub GraphQL │
+                                        └──────────────────┘                   └───────────────┘
                         stderr: [TIMESTAMP] [LEVEL] message
 ```
 
@@ -50,7 +51,7 @@ Implements:
 
 - `initialize` — returns protocol version + server capabilities
 - `ping` — health check
-- `tools/list` — returns all 12 tool definitions with JSON Schema
+- `tools/list` — returns all 21 tool definitions with JSON Schema
 - `tools/call` — dispatches to tool handler, catches errors
 
 Error handling:
