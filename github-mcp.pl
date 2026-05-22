@@ -859,7 +859,39 @@ EOF
     die "GraphQL error: " . ($res->{reason} // 'Failed to add item');
 }
 
-# 21. github_project_update_item — Update a field value on a project item
+# 22. github_project_create_draft — Create a draft issue in a GitHub Project V2
+sub tool_github_project_create_draft {
+    my ($args) = @_;
+    my $project_id = $args->{project_id} or die "Missing required: project_id";
+    my $title      = $args->{title}      or die "Missing required: title";
+    my $body       = $args->{body}       // '';
+
+    my $query = <<'EOF';
+    mutation($projectId: ID!, $title: String!, $body: String) {
+        addProjectV2DraftIssue(input: {projectId: $projectId, title: $title, body: $body}) {
+            projectItem {
+                id
+                content {
+                    ... on DraftIssue {
+                        id
+                        title
+                        body
+                        creator { login }
+                        createdAt
+                    }
+                }
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { projectId => $project_id, title => $title, body => $body });
+    if ($res->{success} && $res->{data}{addProjectV2DraftIssue}{projectItem}) {
+        return $res->{data}{addProjectV2DraftIssue}{projectItem};
+    }
+    die "GraphQL error: " . ($res->{reason} // 'Failed to create draft issue');
+}
+
+# 23. github_project_update_item — Update a field value on a project item
 sub tool_github_project_update_item {
     my ($args) = @_;
     my $project_id  = $args->{project_id}  or die "Missing required: project_id";
@@ -1203,6 +1235,19 @@ my %tool_handlers = (
             properties => {
                 project_id  => { type => "string", description => "GraphQL node ID of the project (use github_project_get)" },
                 content_id  => { type => "string", description => "GraphQL node ID of the issue/PR/draft to add" },
+            },
+        },
+    },
+    github_project_create_draft => {
+        description => "Create a draft issue in a GitHub Project V2",
+        handler     => \&tool_github_project_create_draft,
+        inputSchema => {
+            type => "object",
+            required => ["project_id", "title"],
+            properties => {
+                project_id  => { type => "string", description => "GraphQL node ID of the project" },
+                title       => { type => "string", description => "Draft issue title" },
+                body        => { type => "string", description => "Draft issue body (optional)" },
             },
         },
     },
