@@ -804,17 +804,17 @@ sub tool_github_project_list_items {
                         nodes {
                             id
                             content {
-                                ... on Issue { __typename title number state url repository { full_name } }
-                                ... on PullRequest { __typename title number state url repository { full_name } }
+                                ... on Issue { __typename title number state url repository { nameWithOwner } }
+                                ... on PullRequest { __typename title number state url repository { nameWithOwner } }
                                 ... on DraftIssue { __typename title body }
                             }
                             fieldValues(first: 8) {
                                 nodes {
                                     ... on ProjectV2ItemFieldTextValue { field { ... on ProjectV2FieldCommon { id name } } text }
-                                    ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2FieldCommon { id name } } option { name color } }
+                                    ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2FieldCommon { id name } } name color }
                                     ... on ProjectV2ItemFieldNumberValue { field { ... on ProjectV2FieldCommon { id name } } number }
                                     ... on ProjectV2ItemFieldDateValue { field { ... on ProjectV2FieldCommon { id name } } date }
-                                    ... on ProjectV2ItemFieldIterationValue { field { ... on ProjectV2FieldCommon { id name } } iteration { id title startDate } }
+                                    ... on ProjectV2ItemFieldIterationValue { field { ... on ProjectV2FieldCommon { id name } } title startDate duration }
                                 }
                             }
                         }
