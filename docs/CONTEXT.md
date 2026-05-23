@@ -2,7 +2,7 @@
 
 ## What is github-mcp?
 
-PostgreSQL MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 12 GitHub API tools via MCP protocol.
+GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 27 GitHub API tools (17 REST + 10 GraphQL) via MCP protocol.
 
 ## Why it exists
 
@@ -20,7 +20,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
 
-## Tools (12)
+## Tools (27)
 
 | # | Tool | Purpose |
 | --- | ------ | --------- |
@@ -36,6 +36,21 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 10 | `github_search_code` | Search code |
 | 11 | `github_list_labels` | List labels |
 | 12 | `github_list_repos` | List repos |
+| 13 | `github_project_list` | List GitHub Projects V2 for user/org |
+| 14 | `github_project_get` | Get Project V2 details |
+| 15 | `github_project_create` | Create Project V2 |
+| 16 | `github_project_update` | Update Project V2 settings |
+| 17 | `github_project_delete` | Delete Project V2 |
+| 18 | `github_project_list_fields` | List fields in a Project V2 |
+| 19 | `github_project_list_items` | List items (issues/PRs) in a Project V2 |
+| 20 | `github_project_add_item` | Add existing issue/PR to a Project V2 |
+| 21 | `github_project_update_item` | Update field value on a Project V2 item |
+| 22 | `github_project_create_draft` | Create a draft issue in a Project V2 |
+| 23 | `github_pull_request_get` | Get PR metadata (title, author, base/head, draft, mergeable, stats) |
+| 24 | `github_pull_request_list` | List PRs with filters (state, head, base, sort) |
+| 25 | `github_pull_request_get_files` | Get changed files with patch snippets |
+| 26 | `github_pull_request_list_reviews` | List reviews and line-level review comments |
+| 27 | `github_pull_request_create_review` | Create a review (APPROVE/REQUEST_CHANGES/COMMENT) |
 
 ## History
 
@@ -43,3 +58,6 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-09:** Removed GitHub tools from ai-hub (commit `b0bce45`).
 - **2026-05-09:** Added README.md, docs/, .gitignore.
 - **2026-05-11:** `github_issue_list` now accepts array of repos — single call across all projects.
+- **2026-05-21:** Added GitHub Projects V2 support (10 tools via GraphQL API, including draft issue creation).
+- **2026-05-21:** Discovered GITHUB_TOKEN lacks `read:project` scope — Projects V2 tools blocked until token is regenerated with `read:project` + `write:project`.
+- **2026-05-23:** Added 5 Pull Request tools (get, list, files, reviews, create review). Updated README with token scopes documentation and graceful degradation for write operations.
