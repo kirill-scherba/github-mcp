@@ -1172,9 +1172,70 @@ sub tool_github_pull_request_create_review {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
+# 28. github_pull_request_create — Create a pull request
+sub tool_github_pull_request_create {
+    my ($args) = @_;
+    my $owner    = $args->{owner}    or die "Missing required: owner";
+    my $repo     = $args->{repo}     or die "Missing required: repo";
+    my $title    = $args->{title}    or die "Missing required: title";
+    my $head     = $args->{head}     or die "Missing required: head";
+    my $base     = $args->{base}     or die "Missing required: base";
+    my $body     = $args->{body}     // undef;
+    my $draft    = $args->{draft}    // undef;
+
+    my %payload = (title => $title, head => $head, base => $base);
+    $payload{body}  = $body  if defined $body;
+    $payload{draft} = $draft ? JSON::true : JSON::false if defined $draft;
+
+    my $body_str = $json->encode(\%payload);
+    my $res = _github_api("POST", "/repos/$owner/$repo/pulls", $body_str);
+
+    if ($res->{success}) {
+        my $pr = $res->{data};
+        return {
+            pull_number      => $pr->{number},
+            title            => $pr->{title},
+            body             => $pr->{body} // '',
+            state            => $pr->{state},
+            author           => $pr->{user}{login},
+            draft            => $pr->{draft} // 0,
+            mergeable        => $pr->{mergeable},
+            merged           => $pr->{merged} // 0,
+            merged_by        => $pr->{merged_by}{login} // undef,
+            merge_commit_sha => $pr->{merge_commit_sha} // undef,
+            base             => {
+                ref  => $pr->{base}{ref},
+                sha  => $pr->{base}{sha},
+                repo => $pr->{base}{repo}{full_name},
+            },
+            head             => {
+                ref  => $pr->{head}{ref},
+                sha  => $pr->{head}{sha},
+                repo => $pr->{head}{repo}{full_name},
+            },
+            labels           => [map { $_->{name} } @{$pr->{labels} // []}],
+            additions        => $pr->{additions} // 0,
+            deletions        => $pr->{deletions} // 0,
+            changed_files    => $pr->{changed_files} // 0,
+            commits          => $pr->{commits} // 0,
+            comments         => $pr->{comments} // 0,
+            review_comments  => $pr->{review_comments} // 0,
+            created_at       => $pr->{created_at},
+            updated_at       => $pr->{updated_at},
+            closed_at        => $pr->{closed_at} // undef,
+            merged_at        => $pr->{merged_at} // undef,
+            html_url         => $pr->{html_url},
+            issue_url        => $pr->{issue_url} // '',
+            diff_url         => $pr->{diff_url} // '',
+            patch_url        => $pr->{patch_url} // '',
+        };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list (27 tools: 12 issue/search/file + 10 project
-# + 5 pull request)
+# Tool definitions for tools/list (28 tools: 12 issue/search/file + 10 project
+# + 6 pull request)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
     github_issue_create => {
@@ -1578,6 +1639,23 @@ my %tool_handlers = (
                     },
                     required => ["path", "body"],
                 }, description => "Optional line-specific comments (array of {path, body, line, side})" },
+            },
+        },
+    },
+    github_pull_request_create => {
+        description => "Create a pull request. Returns the created PR with full details.",
+        handler     => \&tool_github_pull_request_create,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "title", "head", "base"],
+            properties => {
+                owner => { type => "string", description => "Repository owner (user or org)" },
+                repo  => { type => "string", description => "Repository name" },
+                title => { type => "string", description => "Pull request title" },
+                head  => { type => "string", description => "Head branch name (source)" },
+                base  => { type => "string", description => "Base branch name (target)" },
+                body  => { type => "string", description => "Pull request body / description (optional)" },
+                draft => { type => "boolean", description => "Create as draft PR (optional, default: false)" },
             },
         },
     },

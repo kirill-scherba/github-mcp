@@ -2,7 +2,7 @@
 
 ## What is github-mcp?
 
-GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 27 GitHub API tools (17 REST + 10 GraphQL) via MCP protocol.
+GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 28 GitHub API tools (18 REST + 10 GraphQL) via MCP protocol.
 
 ## Why it exists
 
@@ -20,7 +20,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
 
-## Tools (27)
+## Tools (28)
 
 | # | Tool | Purpose |
 | --- | ------ | --------- |
@@ -51,6 +51,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 25 | `github_pull_request_get_files` | Get changed files with patch snippets |
 | 26 | `github_pull_request_list_reviews` | List reviews and line-level review comments |
 | 27 | `github_pull_request_create_review` | Create a review (APPROVE/REQUEST_CHANGES/COMMENT) |
+| 28 | `github_pull_request_create` | Create a pull request (owner, repo, title, head, base, optional body/draft) |
 
 ## History
 
@@ -61,3 +62,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-21:** Added GitHub Projects V2 support (10 tools via GraphQL API, including draft issue creation).
 - **2026-05-21:** Discovered GITHUB_TOKEN lacks `read:project` scope — Projects V2 tools blocked until token is regenerated with `read:project` + `write:project`.
 - **2026-05-23:** Added 5 Pull Request tools (get, list, files, reviews, create review). Updated README with token scopes documentation and graceful degradation for write operations.
+- **2026-05-23:** Added `github_pull_request_create` tool (#6) — full PR creation via MCP without bash/curl workarounds.
