@@ -120,7 +120,17 @@ sub _github_api {
         return { success => ($http_code =~ /^2/ ? 1 : 0), status => $http_code, reason => "JSON decode error: $@" };
     }
 
-    return { success => ($http_code =~ /^2/ ? 1 : 0), status => $http_code, data => $data };
+    my $success = $http_code =~ /^2/;
+    if (!$success && ref $data eq 'HASH') {
+        # Extract GitHub API error details from response body
+        my $reason = $data->{message} // "HTTP $http_code";
+        if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
+            my @msgs = map { $_->{message} // $_->{code} // '' } @{$data->{errors}};
+            $reason .= ': ' . join('; ', grep { $_ } @msgs) if @msgs;
+        }
+        return { success => 0, status => $http_code, data => $data, reason => $reason };
+    }
+    return { success => 1, status => $http_code, data => $data };
 }
 
 # ---------------------------------------------------------------------------
@@ -1163,6 +1173,20 @@ sub tool_github_pull_request_create_review {
         };
     }
 
+    # Check for specific GitHub validation errors from API response body
+    if ($res->{data} && ref $res->{data} eq 'HASH') {
+        my $data = $res->{data};
+        if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
+            for my $err (@{$data->{errors}}) {
+                my $msg = $err->{message} // '';
+                if ($msg =~ /owned by you/i) {
+                    die "GitHub does not allow approving your own pull request. "
+                        . "Use event=COMMENT to leave a comment instead, or ask another user to review.";
+                }
+            }
+        }
+    }
+
     # Graceful degradation: detect auth/permission errors
     if ($res->{status} eq '401' || $res->{status} eq '403') {
         die "GitHub API error ($res->{status}): Your GITHUB_TOKEN lacks write permissions for pull request reviews. "
@@ -1618,7 +1642,7 @@ my %tool_handlers = (
         },
     },
     github_pull_request_create_review => {
-        description => "Create a review on a pull request (requires write scope). Supports APPROVE, REQUEST_CHANGES, and COMMENT events.",
+        description => "Create a review on a pull request (requires write scope). Supports APPROVE, REQUEST_CHANGES, and COMMENT events. Note: GitHub does not allow approving your own pull request — use event=COMMENT in that case.",
         handler     => \&tool_github_pull_request_create_review,
         inputSchema => {
             type => "object",
