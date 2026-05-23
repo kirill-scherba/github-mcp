@@ -137,7 +137,10 @@ Six PR tools were added using the GitHub REST API:
 - `github_pull_request_create` — uses `POST /repos/{o}/{r}/pulls` to create a PR with title, head, base (required) and optional body/draft
 
 **Graceful degradation:** The create_review tool detects 401/403 responses and returns a descriptive error
-with required token scopes instead of a generic failure.
+with required token scopes instead of a generic failure. REST API validation errors preserve the GitHub
+response body details in `reason`, so HTTP 422 failures include actionable messages such as self-approval
+being rejected. GitHub does not allow approving your own pull request; callers should use `event=COMMENT`
+for self-authored PRs or ask another user to review.
 
 **Why REST not GraphQL:** PR REST endpoints are mature, well-documented, and return all needed data
 in a single call (unlike Projects V2 which required GraphQL for nested data access).

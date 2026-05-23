@@ -212,7 +212,7 @@ The GitHub token (`GITHUB_TOKEN`) needs different scopes depending on which tool
 ### Graceful Degradation
 
 - **Read-only PR tools** (`github_pull_request_get`, `github_pull_request_list`, `github_pull_request_get_files`, `github_pull_request_list_reviews`) work with `public_repo` scope for public repos.
-- **`github_pull_request_create_review`** requires write permissions (`repo` for private, `public_repo` for public). If the token lacks write scope, the tool returns a descriptive error with the required scope information — no crashes or opaque failures.
+- **`github_pull_request_create_review`** requires write permissions (`repo` for private, `public_repo` for public). If the token lacks write scope, the tool returns a descriptive error with the required scope information — no crashes or opaque failures. GitHub does not allow approving your own pull request; use `event=COMMENT` for self-authored PRs or ask another user to review. GitHub API validation errors are propagated with response details instead of opaque HTTP status messages.
 - **`github_pull_request_create`** requires write permissions (`repo` for private, `public_repo` for public).
 
 To generate a token with the required scopes:
