@@ -5,7 +5,7 @@
 # Repository: github.com/kirill-scherba/github-mcp
 #
 # Features:
-#   - 26 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
+#   - 27 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
 #   - Direct GITHUB_TOKEN from environment (no Safe sandbox limitations)
 #   - JSON-RPC 2.0 over stdin/stdout (MCP protocol)
 #   - Detailed logging to stderr
@@ -1072,7 +1072,7 @@ sub tool_github_pull_request_get_files {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
-# 27. github_pull_request_list_reviews — List reviews and review comments on a PR
+# 27. github_pull_request_list_reviews — List reviews and line-level review comments on a PR
 sub tool_github_pull_request_list_reviews {
     my ($args) = @_;
     my $owner        = $args->{owner}        or die "Missing required: owner";
@@ -1080,10 +1080,12 @@ sub tool_github_pull_request_list_reviews {
     my $pull_number  = $args->{pull_number}  or die "Missing required: pull_number";
     my $limit        = $args->{limit}        // 50;
 
-    my $res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number/reviews?per_page=$limit");
-    if ($res->{success}) {
+    my $reviews_res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number/reviews?per_page=$limit");
+    my $comments_res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number/comments?per_page=$limit");
+
+    if ($reviews_res->{success} && $comments_res->{success}) {
         my @reviews;
-        for my $r (@{$res->{data} // []}) {
+        for my $r (@{$reviews_res->{data} // []}) {
             push @reviews, {
                 id           => $r->{id},
                 user         => $r->{user}{login},
@@ -1095,9 +1097,40 @@ sub tool_github_pull_request_list_reviews {
                 html_url     => $r->{html_url} // '',
             };
         }
-        return { reviews => \@reviews, count => scalar @reviews };
+
+        my @review_comments;
+        for my $c (@{$comments_res->{data} // []}) {
+            push @review_comments, {
+                id           => $c->{id},
+                user         => $c->{user}{login},
+                body         => $c->{body} // '',
+                path         => $c->{path} // '',
+                diff_hunk    => $c->{diff_hunk} // '',
+                line         => $c->{line} // undef,
+                side         => $c->{side} // '',
+                start_line   => $c->{start_line} // undef,
+                start_side   => $c->{start_side} // '',
+                original_line => $c->{original_line} // undef,
+                commit_id    => $c->{commit_id} // '',
+                pull_request_review_id => $c->{pull_request_review_id} // undef,
+                author_association => $c->{author_association} // '',
+                created_at   => $c->{created_at},
+                updated_at   => $c->{updated_at},
+                html_url     => $c->{html_url} // '',
+            };
+        }
+
+        return {
+            reviews               => \@reviews,
+            review_comments       => \@review_comments,
+            count                 => scalar @reviews,
+            reviews_count         => scalar @reviews,
+            review_comments_count => scalar @review_comments,
+        };
     }
-    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+
+    my $failed = $reviews_res->{success} ? $comments_res : $reviews_res;
+    die "GitHub API error: " . ($failed->{reason} // "HTTP $failed->{status}");
 }
 
 # 28. github_pull_request_create_review — Create a review on a PR (write scope required)
@@ -1140,7 +1173,7 @@ sub tool_github_pull_request_create_review {
 }
 
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list (26 tools: 12 issue/search/file + 9 project
+# Tool definitions for tools/list (27 tools: 12 issue/search/file + 10 project
 # + 5 pull request)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
@@ -1510,7 +1543,7 @@ my %tool_handlers = (
         },
     },
     github_pull_request_list_reviews => {
-        description => "List reviews and review comments on a pull request",
+        description => "List reviews and line-level review comments on a pull request",
         handler     => \&tool_github_pull_request_list_reviews,
         inputSchema => {
             type => "object",
@@ -1648,4 +1681,3 @@ LINE: while (my $line = <STDIN>) {
         respond_error($id, -32601, "Method not found: $method");
     }
 }
-

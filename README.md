@@ -4,13 +4,13 @@
 [![MCP](https://img.shields.io/badge/MCP-2024--11--05-green.svg)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
-> **Standalone MCP server for GitHub API — 26 tools for issues, pull requests, files, search, labels, repositories, and projects.**
+> **Standalone MCP server for GitHub API — 27 tools for issues, pull requests, files, search, labels, repositories, and projects.**
 
 Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated MCP server for better separation of concerns. Uses direct `GITHUB_TOKEN` from environment — no sandbox limitations, full GitHub API access.
 
 ## Features
 
-- **26 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), pull requests (get, list, files, reviews, create review), files (get, create/update), search (issues, code), labels (list), repositories (list), projects V2 (list, get, create, update, delete, fields, items, add item, update item)
+- **27 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), pull requests (get, list, files, reviews, create review), files (get, create/update), search (issues, code), labels (list), repositories (list), projects V2 (list, get, create, update, delete, fields, items, add item, create draft, update item)
 - **Direct authentication** — `GITHUB_TOKEN` from environment variable, no Safe sandbox limitations
 - **Clean JSON-RPC 2.0** — MCP protocol over stdin/stdout
 - **Structured logging** — all logs to stderr, stdout clean for JSON-RPC
@@ -32,10 +32,20 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 | `github_search_code` | Search code across repositories |
 | `github_list_labels` | List labels in a repository |
 | `github_list_repos` | List repositories for a user or org |
+| `github_project_list` | List GitHub Projects V2 for a user or organization |
+| `github_project_get` | Get Project V2 details |
+| `github_project_create` | Create a new Project V2 |
+| `github_project_update` | Update Project V2 settings |
+| `github_project_delete` | Delete a Project V2 |
+| `github_project_list_fields` | List fields in a Project V2 |
+| `github_project_list_items` | List items in a Project V2 |
+| `github_project_add_item` | Add an existing issue, PR, or draft issue to a Project V2 |
+| `github_project_create_draft` | Create a draft issue in a Project V2 |
+| `github_project_update_item` | Update a field value on a Project V2 item |
 | `github_pull_request_get` | Get PR metadata (title, author, base/head, draft, mergeable, stats) |
 | `github_pull_request_list` | List PRs with filters (state, head, base, sort) |
 | `github_pull_request_get_files` | Get changed files with patch snippets for code review |
-| `github_pull_request_list_reviews` | List reviews and review comments on a PR |
+| `github_pull_request_list_reviews` | List reviews and line-level review comments on a PR |
 | `github_pull_request_create_review` | Create a PR review (APPROVE/REQUEST_CHANGES/COMMENT) |
 
 ### List GitHub Projects V2
@@ -232,7 +242,7 @@ export GITHUB_TOKEN="github_pat_..."
 │  │ MCP Main │──>│  Request      │──>│  GitHub REST API │  │
 │  │ Loop     │   │  Dispatcher   │   │  via curl        │  │
 │  │          │   │              │   │                  │  │
-│  │ while    │   │ • 12 tools   │   │  + auth via      │  │
+│  │ while    │   │ • 27 tools   │   │  + auth via      │  │
 │  │ <STDIN>  │   │ • JSON-RPC   │   │  GITHUB_TOKEN    │  │
 │  │          │   │ • structured  │   │                  │  │
 │  │          │   │   responses  │   │                  │  │
@@ -246,7 +256,7 @@ export GITHUB_TOKEN="github_pat_..."
 |--------|----------------|-------------------|
 | Auth | Hardcoded `GITHUB_TOKEN` in `our` variable | Environment variable, clean |
 | Sandbox | Safe sandbox — GitHub API restricted | Direct curl, no restrictions |
-| Surface area | 6 GitHub + 10 util tools = 16 | 26 GitHub-only tools, focused |
+| Surface area | 6 GitHub + 10 util tools = 16 | 27 GitHub-only tools, focused |
 | Dependency | ai-hub needs both | Standalone, independent |
 | Deployment | Full ai-hub server | Single-file Perl script |
 
@@ -258,7 +268,7 @@ This server implements the **Model Context Protocol (MCP)** using **JSON-RPC 2.0
 | -------- | ------------- |
 | `initialize` | Handshake with protocol version and capabilities |
 | `ping` | Health check |
-| `tools/list` | Returns all 26 tool definitions with JSON Schema |
+| `tools/list` | Returns all 27 tool definitions with JSON Schema |
 | `tools/call` | Executes a tool by name with provided arguments |
 
 All logging goes to **stderr**, leaving **stdout** clean for JSON-RPC messages.
