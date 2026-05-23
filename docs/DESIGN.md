@@ -51,7 +51,7 @@ Implements:
 
 - `initialize` — returns protocol version + server capabilities
 - `ping` — health check
-- `tools/list` — returns all 27 tool definitions with JSON Schema
+- `tools/list` — returns all 28 tool definitions with JSON Schema
 - `tools/call` — dispatches to tool handler, catches errors
 
 Error handling:
@@ -127,13 +127,14 @@ All Projects V2 tools (10 tools total) use `_github_graphql`. One tool (`github_
 
 ### 9. Pull Request Tools (added 2026-05-23)
 
-Five PR tools were added using the GitHub REST API:
+Six PR tools were added using the GitHub REST API:
 
 - `github_pull_request_get` — uses `GET /repos/{o}/{r}/pulls/{n}` for full PR metadata
 - `github_pull_request_list` — uses `GET /repos/{o}/{r}/pulls` with state/head/base/sort/direction filters
 - `github_pull_request_get_files` — uses `GET /repos/{o}/{r}/pulls/{n}/files` with per-file patch snippets
 - `github_pull_request_list_reviews` — uses `GET /repos/{o}/{r}/pulls/{n}/reviews` for review history and `GET /repos/{o}/{r}/pulls/{n}/comments` for line-level review comments
 - `github_pull_request_create_review` — uses `POST /repos/{o}/{r}/pulls/{n}/reviews` with body, event, and optional line comments
+- `github_pull_request_create` — uses `POST /repos/{o}/{r}/pulls` to create a PR with title, head, base (required) and optional body/draft
 
 **Graceful degradation:** The create_review tool detects 401/403 responses and returns a descriptive error
 with required token scopes instead of a generic failure.
