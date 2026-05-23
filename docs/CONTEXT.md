@@ -63,3 +63,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-21:** Discovered GITHUB_TOKEN lacks `read:project` scope — Projects V2 tools blocked until token is regenerated with `read:project` + `write:project`.
 - **2026-05-23:** Added 5 Pull Request tools (get, list, files, reviews, create review). Updated README with token scopes documentation and graceful degradation for write operations.
 - **2026-05-23:** Added `github_pull_request_create` tool (#6) — full PR creation via MCP without bash/curl workarounds.
+- **2026-05-23:** Improved REST error handling for PR review creation (#8/#9): GitHub API validation details are propagated, self-approval receives a clear user-facing message, and non-2xx responses keep `success => 0`.
