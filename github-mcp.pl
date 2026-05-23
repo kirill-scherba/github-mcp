@@ -759,8 +759,6 @@ sub tool_github_project_list_fields {
                             ... on ProjectV2Field { __typename id name dataType }
                             ... on ProjectV2SingleSelectField { __typename id name dataType options { id name color } }
                             ... on ProjectV2IterationField { __typename id name dataType configuration { iterations { id title startDate duration } } }
-                            ... on ProjectV2DateField { __typename id name dataType }
-                            ... on ProjectV2NumberField { __typename id name dataType }
                         }
                         pageInfo { hasNextPage endCursor }
                     }
@@ -932,7 +930,7 @@ sub tool_github_project_update_item {
         ) {
             projectV2Item {
                 id
-                fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { option { name } } }
+                fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
             }
         }
     }
