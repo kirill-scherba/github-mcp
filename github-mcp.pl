@@ -5,7 +5,7 @@
 # Repository: github.com/kirill-scherba/github-mcp
 #
 # Features:
-#   - 12 GitHub API tools (issues, files, search, repos, labels)
+#   - 26 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
 #   - Direct GITHUB_TOKEN from environment (no Safe sandbox limitations)
 #   - JSON-RPC 2.0 over stdin/stdout (MCP protocol)
 #   - Detailed logging to stderr
@@ -949,8 +949,201 @@ EOF
     die "GraphQL error: " . ($res->{reason} // 'Failed to update item');
 }
 
+# ============================================================================
+# Pull Request Tools (REST API)
+# ============================================================================
+
+# 24. github_pull_request_get — Get PR metadata by number
+sub tool_github_pull_request_get {
+    my ($args) = @_;
+    my $owner        = $args->{owner}        or die "Missing required: owner";
+    my $repo         = $args->{repo}         or die "Missing required: repo";
+    my $pull_number  = $args->{pull_number}  or die "Missing required: pull_number";
+
+    my $res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number");
+    if ($res->{success}) {
+        my $pr = $res->{data};
+        return {
+            pull_number  => $pr->{number},
+            title        => $pr->{title},
+            body         => $pr->{body} // '',
+            state        => $pr->{state},
+            author       => $pr->{user}{login},
+            draft        => $pr->{draft} // 0,
+            mergeable    => $pr->{mergeable},
+            merged       => $pr->{merged} // 0,
+            merged_by    => $pr->{merged_by}{login} // undef,
+            merge_commit_sha => $pr->{merge_commit_sha} // undef,
+            base         => {
+                ref  => $pr->{base}{ref},
+                sha  => $pr->{base}{sha},
+                repo => $pr->{base}{repo}{full_name},
+            },
+            head         => {
+                ref  => $pr->{head}{ref},
+                sha  => $pr->{head}{sha},
+                repo => $pr->{head}{repo}{full_name},
+            },
+            labels       => [map { $_->{name} } @{$pr->{labels} // []}],
+            additions    => $pr->{additions} // 0,
+            deletions    => $pr->{deletions} // 0,
+            changed_files => $pr->{changed_files} // 0,
+            commits      => $pr->{commits} // 0,
+            comments     => $pr->{comments} // 0,
+            review_comments => $pr->{review_comments} // 0,
+            created_at   => $pr->{created_at},
+            updated_at   => $pr->{updated_at},
+            closed_at    => $pr->{closed_at} // undef,
+            merged_at    => $pr->{merged_at} // undef,
+            html_url     => $pr->{html_url},
+            issue_url    => $pr->{issue_url} // '',
+            diff_url     => $pr->{diff_url} // '',
+            patch_url    => $pr->{patch_url} // '',
+        };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
+# 25. github_pull_request_list — List PRs with filters
+sub tool_github_pull_request_list {
+    my ($args) = @_;
+    my $owner     = $args->{owner}     or die "Missing required: owner";
+    my $repo      = $args->{repo}      or die "Missing required: repo";
+    my $state     = $args->{state}     // 'open';
+    my $head      = $args->{head}      // undef;
+    my $base      = $args->{base}      // undef;
+    my $sort      = $args->{sort}      // 'created';
+    my $direction = $args->{direction} // 'desc';
+    my $limit     = $args->{limit}     // 30;
+
+    my $path = "/repos/$owner/$repo/pulls?state=$state&per_page=$limit&sort=$sort&direction=$direction";
+    $path .= "&head=$head" if $head;
+    $path .= "&base=$base" if $base;
+
+    my $res = _github_api("GET", $path);
+    if ($res->{success}) {
+        my @prs;
+        for my $pr (@{$res->{data} // []}) {
+            push @prs, {
+                pull_number  => $pr->{number},
+                title        => $pr->{title},
+                state        => $pr->{state},
+                author       => $pr->{user}{login},
+                draft        => $pr->{draft} // 0,
+                base         => { ref => $pr->{base}{ref}, repo => $pr->{base}{repo}{full_name} },
+                head         => { ref => $pr->{head}{ref}, repo => $pr->{head}{repo}{full_name} },
+                labels       => [map { $_->{name} } @{$pr->{labels} // []}],
+                created_at   => $pr->{created_at},
+                updated_at   => $pr->{updated_at},
+                html_url     => $pr->{html_url},
+            };
+        }
+        return { pull_requests => \@prs, count => scalar @prs };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
+# 26. github_pull_request_get_files — Get changed files with patch snippets
+sub tool_github_pull_request_get_files {
+    my ($args) = @_;
+    my $owner        = $args->{owner}        or die "Missing required: owner";
+    my $repo         = $args->{repo}         or die "Missing required: repo";
+    my $pull_number  = $args->{pull_number}  or die "Missing required: pull_number";
+    my $limit        = $args->{limit}        // 100;
+
+    my $res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number/files?per_page=$limit");
+    if ($res->{success}) {
+        my @files;
+        for my $f (@{$res->{data} // []}) {
+            push @files, {
+                filename          => $f->{filename},
+                status            => $f->{status},  # added, modified, removed, renamed
+                additions         => $f->{additions},
+                deletions         => $f->{deletions},
+                changes           => $f->{changes},
+                patch             => $f->{patch} // '',
+                contents_url      => $f->{contents_url},
+                blob_url          => $f->{blob_url},
+                raw_url           => $f->{raw_url},
+                sha               => $f->{sha},
+                previous_filename => $f->{previous_filename} // undef,
+            };
+        }
+        return { files => \@files, count => scalar @files };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
+# 27. github_pull_request_list_reviews — List reviews and review comments on a PR
+sub tool_github_pull_request_list_reviews {
+    my ($args) = @_;
+    my $owner        = $args->{owner}        or die "Missing required: owner";
+    my $repo         = $args->{repo}         or die "Missing required: repo";
+    my $pull_number  = $args->{pull_number}  or die "Missing required: pull_number";
+    my $limit        = $args->{limit}        // 50;
+
+    my $res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number/reviews?per_page=$limit");
+    if ($res->{success}) {
+        my @reviews;
+        for my $r (@{$res->{data} // []}) {
+            push @reviews, {
+                id           => $r->{id},
+                user         => $r->{user}{login},
+                body         => $r->{body} // '',
+                state        => $r->{state},  # APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING
+                author_association => $r->{author_association} // '',
+                commit_id    => $r->{commit_id},
+                submitted_at => $r->{submitted_at},
+                html_url     => $r->{html_url} // '',
+            };
+        }
+        return { reviews => \@reviews, count => scalar @reviews };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
+# 28. github_pull_request_create_review — Create a review on a PR (write scope required)
+# Graceful degradation: returns helpful message if token lacks write scopes.
+sub tool_github_pull_request_create_review {
+    my ($args) = @_;
+    my $owner        = $args->{owner}        or die "Missing required: owner";
+    my $repo         = $args->{repo}         or die "Missing required: repo";
+    my $pull_number  = $args->{pull_number}  or die "Missing required: pull_number";
+    my $body         = $args->{body}         or die "Missing required: body";
+    my $event        = $args->{event}        // 'COMMENT';  # APPROVE, REQUEST_CHANGES, COMMENT
+    my $comments     = $args->{comments}     // undef;       # array of {path, body, line, side}
+
+    my %payload = (body => $body, event => $event);
+    $payload{comments} = $comments if $comments && ref $comments eq 'ARRAY' && @$comments;
+
+    my $body_str = $json->encode(\%payload);
+    my $res = _github_api("POST", "/repos/$owner/$repo/pulls/$pull_number/reviews", $body_str);
+
+    if ($res->{success}) {
+        my $review = $res->{data};
+        return {
+            review_id    => $review->{id},
+            user         => $review->{user}{login},
+            body         => $review->{body} // '',
+            state        => $review->{state},
+            commit_id    => $review->{commit_id},
+            submitted_at => $review->{submitted_at},
+            html_url     => $review->{html_url} // '',
+        };
+    }
+
+    # Graceful degradation: detect auth/permission errors
+    if ($res->{status} eq '401' || $res->{status} eq '403') {
+        die "GitHub API error ($res->{status}): Your GITHUB_TOKEN lacks write permissions for pull request reviews. "
+            . "Required scope: 'repo' for private repos or 'public_repo' for public repos. "
+            . "See: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps";
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list
+# Tool definitions for tools/list (26 tools: 12 issue/search/file + 9 project
+# + 5 pull request)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
     github_issue_create => {
@@ -1267,6 +1460,93 @@ my %tool_handlers = (
                 date          => { type => "string", description => "Date value YYYY-MM-DD (overrides value)" },
                 option_id     => { type => "string", description => "Single select option ID (overrides value)" },
                 iteration_id  => { type => "string", description => "Iteration ID (overrides value)" },
+            },
+        },
+    },
+
+    # === Pull Request Tools (REST) ===
+
+    github_pull_request_get => {
+        description => "Get details of a specific GitHub pull request",
+        handler     => \&tool_github_pull_request_get,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                pull_number  => { type => "number", description => "Pull request number" },
+            },
+        },
+    },
+    github_pull_request_list => {
+        description => "List GitHub pull requests with optional filters",
+        handler     => \&tool_github_pull_request_list,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo"],
+            properties => {
+                owner      => { type => "string", description => "Repository owner (user or org)" },
+                repo       => { type => "string", description => "Repository name" },
+                state      => { type => "string", description => "PR state: open, closed, all (default: open)" },
+                head       => { type => "string", description => "Filter by head branch name (optional)" },
+                base       => { type => "string", description => "Filter by base branch name (optional)" },
+                sort       => { type => "string", description => "Sort: created, updated, popularity, long-running (default: created)" },
+                direction  => { type => "string", description => "Direction: asc, desc (default: desc)" },
+                limit      => { type => "number", description => "Max results (default: 30)" },
+            },
+        },
+    },
+    github_pull_request_get_files => {
+        description => "Get changed files and patch snippets for a pull request",
+        handler     => \&tool_github_pull_request_get_files,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                pull_number  => { type => "number", description => "Pull request number" },
+                limit        => { type => "number", description => "Max files (default: 100)" },
+            },
+        },
+    },
+    github_pull_request_list_reviews => {
+        description => "List reviews and review comments on a pull request",
+        handler     => \&tool_github_pull_request_list_reviews,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                pull_number  => { type => "number", description => "Pull request number" },
+                limit        => { type => "number", description => "Max reviews (default: 50)" },
+            },
+        },
+    },
+    github_pull_request_create_review => {
+        description => "Create a review on a pull request (requires write scope). Supports APPROVE, REQUEST_CHANGES, and COMMENT events.",
+        handler     => \&tool_github_pull_request_create_review,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number", "body"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                pull_number  => { type => "number", description => "Pull request number" },
+                body         => { type => "string", description => "Review body text" },
+                event        => { type => "string", description => "Review event: APPROVE, REQUEST_CHANGES, COMMENT (default: COMMENT)" },
+                comments     => { type => "array", items => {
+                    type => "object",
+                    properties => {
+                        path => { type => "string", description => "File path the comment applies to" },
+                        body => { type => "string", description => "Comment text" },
+                        line => { type => "number", description => "Line number (optional)" },
+                        side => { type => "string", description => "Side: LEFT, RIGHT (optional)" },
+                    },
+                    required => ["path", "body"],
+                }, description => "Optional line-specific comments (array of {path, body, line, side})" },
             },
         },
     },
