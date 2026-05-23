@@ -130,7 +130,7 @@ sub _github_api {
         }
         return { success => 0, status => $http_code, data => $data, reason => $reason };
     }
-    return { success => 1, status => $http_code, data => $data };
+    return { success => ($success ? 1 : 0), status => $http_code, data => $data };
 }
 
 # ---------------------------------------------------------------------------
