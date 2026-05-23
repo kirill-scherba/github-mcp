@@ -1172,7 +1172,7 @@ sub tool_github_pull_request_create_review {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
-# 29. github_pull_request_create — Create a pull request
+# 28. github_pull_request_create — Create a pull request
 sub tool_github_pull_request_create {
     my ($args) = @_;
     my $owner    = $args->{owner}    or die "Missing required: owner";
@@ -1234,8 +1234,8 @@ sub tool_github_pull_request_create {
 }
 
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list (29 tools: 12 issue/search/file + 10 project
-# + 7 pull request)
+# Tool definitions for tools/list (28 tools: 12 issue/search/file + 10 project
+# + 6 pull request)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
     github_issue_create => {
