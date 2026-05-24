@@ -145,6 +145,36 @@ for self-authored PRs or ask another user to review.
 **Why REST not GraphQL:** PR REST endpoints are mature, well-documented, and return all needed data
 in a single call (unlike Projects V2 which required GraphQL for nested data access).
 
+### 10. Project Item Search with Status Filter
+
+`github_project_search_items` (tool #29) provides a high-level search interface over Project V2 items:
+
+**Why a separate tool instead of extending `github_project_list_items`:**
+- Accepts project **title** (human-readable) instead of opaque project number
+- Automatically resolves project by name across all user/organization projects
+- Uses GitHub GraphQL `filterBy` parameter for **server-side filtering** — no post-filtering in Perl
+- Returns consistently formatted items with extracted Status field value
+
+**Workflow:**
+```
+tools/call → github_project_search_items({owner, project, status?, limit?})
+  → _github_graphql: list projects → find by title → get project number
+  → _github_graphql: list fields → find "Status" SingleSelect field → get option ID
+  → _github_graphql: items(first:N, filterBy: {fieldId, operator: EQUALS, value: optionId})
+  → format items with {title, number, type, status, url, repo}
+```
+
+**GraphQL filterBy support:**
+```graphql
+items(first: $limit, filterBy: {fieldId: $fieldId, operator: EQUALS, value: $statusValue}) {
+```
+This filters directly in the GitHub API — only items matching the status are returned, reducing data transfer and post-processing.
+
+**Status field resolution:**
+1. Query `fields` for the project, filter for `ProjectV2SingleSelectField` named "Status"
+2. Match the requested status value (case-insensitive) against option names
+3. Use the option's `id` (not name) as the filter value — GitHub requires option ID for single-select filters
+
 ## Future Considerations
 
 - Add `github_create_repository` tool

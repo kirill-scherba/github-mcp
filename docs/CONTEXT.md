@@ -20,7 +20,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
 
-## Tools (28)
+## Tools (29)
 
 | # | Tool | Purpose |
 | --- | ------ | --------- |
@@ -43,15 +43,16 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 17 | `github_project_delete` | Delete Project V2 |
 | 18 | `github_project_list_fields` | List fields in a Project V2 |
 | 19 | `github_project_list_items` | List items (issues/PRs) in a Project V2 |
-| 20 | `github_project_add_item` | Add existing issue/PR to a Project V2 |
-| 21 | `github_project_update_item` | Update field value on a Project V2 item |
-| 22 | `github_project_create_draft` | Create a draft issue in a Project V2 |
-| 23 | `github_pull_request_get` | Get PR metadata (title, author, base/head, draft, mergeable, stats) |
-| 24 | `github_pull_request_list` | List PRs with filters (state, head, base, sort) |
-| 25 | `github_pull_request_get_files` | Get changed files with patch snippets |
-| 26 | `github_pull_request_list_reviews` | List reviews and line-level review comments |
-| 27 | `github_pull_request_create_review` | Create a review (APPROVE/REQUEST_CHANGES/COMMENT) |
-| 28 | `github_pull_request_create` | Create a pull request (owner, repo, title, head, base, optional body/draft) |
+| 20 | `github_project_search_items` | Search items by project name and optional status filter (Backlog, In Progress, Done) |
+| 21 | `github_project_add_item` | Add existing issue/PR to a Project V2 |
+| 22 | `github_project_update_item` | Update field value on a Project V2 item |
+| 23 | `github_project_create_draft` | Create a draft issue in a Project V2 |
+| 24 | `github_pull_request_get` | Get PR metadata (title, author, base/head, draft, mergeable, stats) |
+| 25 | `github_pull_request_list` | List PRs with filters (state, head, base, sort) |
+| 26 | `github_pull_request_get_files` | Get changed files with patch snippets |
+| 27 | `github_pull_request_list_reviews` | List reviews and line-level review comments |
+| 28 | `github_pull_request_create_review` | Create a review (APPROVE/REQUEST_CHANGES/COMMENT) |
+| 29 | `github_pull_request_create` | Create a pull request (owner, repo, title, head, base, optional body/draft) |
 
 ## History
 
@@ -64,3 +65,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-23:** Added 5 Pull Request tools (get, list, files, reviews, create review). Updated README with token scopes documentation and graceful degradation for write operations.
 - **2026-05-23:** Added `github_pull_request_create` tool (#6) — full PR creation via MCP without bash/curl workarounds.
 - **2026-05-23:** Improved REST error handling for PR review creation (#8/#9): GitHub API validation details are propagated, self-approval receives a clear user-facing message, and non-2xx responses keep `success => 0`.
+- **2026-05-24:** Added `github_project_search_items` tool (#29) — search items by project title and optional Status field filter (Backlog, In Progress, Done). Resolves project by name automatically, uses GraphQL `filterBy` for server-side filtering.

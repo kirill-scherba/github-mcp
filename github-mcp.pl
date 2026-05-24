@@ -840,6 +840,211 @@ sub tool_github_project_list_items {
     die "GraphQL error: " . ($res->{reason} // 'Failed to list items');
 }
 
+# 29. github_project_search_items — Find items in a Project V2 by name and optional status filter
+sub tool_github_project_search_items {
+    my ($args) = @_;
+    my $owner   = $args->{owner}       or die "Missing required: owner";
+    my $project = $args->{project}     or die "Missing required: project";
+    my $status  = $args->{status}      // undef;
+    my $limit   = $args->{limit}       // 50;
+    my $type    = $args->{owner_type}  // 'auto';
+
+    # Step 1: Resolve owner type
+    my $field = '';
+    if ($type eq 'auto') {
+        (my $t, undef) = _resolve_owner($owner);
+        $field = $t;
+    } elsif ($type eq 'org') {
+        $field = 'organization';
+    } elsif ($type eq 'user') {
+        $field = 'user';
+    } else {
+        die "Invalid owner_type '$type'";
+    }
+
+    # Step 2: List projects to find the one matching by title
+    my $list_query = qq{
+        query(\$owner: String!, \$limit: Int!) {
+            $field(login: \$owner) {
+                projectsV2(first: \$limit) {
+                    nodes {
+                        id
+                        number
+                        title
+                    }
+                }
+            }
+        }
+    };
+    my $list_res = _github_graphql($list_query, { owner => $owner, limit => 100 });
+    die "GraphQL error listing projects: " . ($list_res->{reason} // 'unknown') unless $list_res->{success};
+
+    my $projects = $list_res->{data}{$field}{projectsV2}{nodes} // [];
+    my ($project_node) = grep { lc($_->{title}) eq lc($project) } @$projects;
+    die "Project '$project' not found for owner '$owner'" unless $project_node;
+
+    my $project_id     = $project_node->{id};
+    my $project_number = $project_node->{number};
+
+    # Step 3: If status filter is set, find the Status field and target option ID
+    my $field_id;
+    my $status_value;
+
+    if (defined $status && $status ne '') {
+        my $fields_query = qq{
+            query(\$owner: String!, \$number: Int!, \$limit: Int!) {
+                $field(login: \$owner) {
+                    projectV2(number: \$number) {
+                        fields(first: \$limit) {
+                            nodes {
+                                ... on ProjectV2SingleSelectField {
+                                    __typename
+                                    id
+                                    name
+                                    options { id name }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        my $fields_res = _github_graphql($fields_query, { owner => $owner, number => $project_number, limit => 50 });
+        die "GraphQL error listing fields: " . ($fields_res->{reason} // 'unknown') unless $fields_res->{success};
+
+        my $fields = $fields_res->{data}{$field}{projectV2}{fields}{nodes} // [];
+        my ($status_field) = grep { $_->{name} eq 'Status' } @$fields;
+        die "Project '$project' has no 'Status' field" unless $status_field;
+
+        $field_id = $status_field->{id};
+        my ($option) = grep { lc($_->{name}) eq lc($status) } @{$status_field->{options} // []};
+        die "Status value '$status' not found in Status field options" unless $option;
+
+        $status_value = $option->{id};
+    }
+
+    # Step 4: Query items with optional filterBy
+    my $items_query;
+    my $query_vars;
+
+    if (defined $field_id && defined $status_value) {
+        $items_query = qq{
+            query(\$owner: String!, \$number: Int!, \$limit: Int!, \$fieldId: ID!, \$statusValue: String!) {
+                $field(login: \$owner) {
+                    projectV2(number: \$number) {
+                        items(first: \$limit, filterBy: {fieldId: \$fieldId, operator: EQUALS, value: \$statusValue}) {
+                            nodes {
+                                id
+                                content {
+                                    ... on Issue { __typename title number state url repository { nameWithOwner } }
+                                    ... on PullRequest { __typename title number state url repository { nameWithOwner } }
+                                    ... on DraftIssue { __typename title body }
+                                }
+                                fieldValues(first: 8) {
+                                    nodes {
+                                        ... on ProjectV2ItemFieldSingleSelectValue {
+                                            field { ... on ProjectV2FieldCommon { id name } }
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                            pageInfo { hasNextPage endCursor }
+                        }
+                    }
+                }
+            }
+        };
+        $query_vars = { owner => $owner, number => $project_number, limit => $limit, fieldId => $field_id, statusValue => $status_value };
+    } else {
+        $items_query = qq{
+            query(\$owner: String!, \$number: Int!, \$limit: Int!) {
+                $field(login: \$owner) {
+                    projectV2(number: \$number) {
+                        items(first: \$limit) {
+                            nodes {
+                                id
+                                content {
+                                    ... on Issue { __typename title number state url repository { nameWithOwner } }
+                                    ... on PullRequest { __typename title number state url repository { nameWithOwner } }
+                                    ... on DraftIssue { __typename title body }
+                                }
+                                fieldValues(first: 8) {
+                                    nodes {
+                                        ... on ProjectV2ItemFieldSingleSelectValue {
+                                            field { ... on ProjectV2FieldCommon { id name } }
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                            pageInfo { hasNextPage endCursor }
+                        }
+                    }
+                }
+            }
+        };
+        $query_vars = { owner => $owner, number => $project_number, limit => $limit };
+    }
+
+    my $items_res = _github_graphql($items_query, $query_vars);
+    die "GraphQL error listing items: " . ($items_res->{reason} // 'unknown') unless $items_res->{success};
+
+    my $raw_items = $items_res->{data}{$field}{projectV2}{items}{nodes} // [];
+    my $page_info = $items_res->{data}{$field}{projectV2}{items}{pageInfo};
+
+    # Format items with status extracted from fieldValues
+    my @formatted;
+    for my $item (@$raw_items) {
+        my $content = $item->{content} // {};
+        my $type = $content->{__typename} // 'Unknown';
+
+        # Extract Status from fieldValues
+        my $item_status = '';
+        my $field_values = $item->{fieldValues}{nodes} // [];
+        for my $fv (@$field_values) {
+            if ($fv->{field} && $fv->{field}{name} eq 'Status') {
+                $item_status = $fv->{name} // '';
+                last;
+            }
+        }
+
+        my $entry = { id => $item->{id}, type => $type, status => $item_status };
+
+        if ($type eq 'Issue') {
+            $entry->{title}  = $content->{title} // '';
+            $entry->{number} = $content->{number};
+            $entry->{state}  = $content->{state} // '';
+            $entry->{url}    = $content->{url} // '';
+            $entry->{repo}   = $content->{repository}{nameWithOwner} // '';
+        } elsif ($type eq 'PullRequest') {
+            $entry->{title}  = $content->{title} // '';
+            $entry->{number} = $content->{number};
+            $entry->{state}  = $content->{state} // '';
+            $entry->{url}    = $content->{url} // '';
+            $entry->{repo}   = $content->{repository}{nameWithOwner} // '';
+        } elsif ($type eq 'DraftIssue') {
+            $entry->{title}  = $content->{title} // '';
+            $entry->{body}   = $content->{body} // '';
+        }
+
+        push @formatted, $entry;
+    }
+
+    return {
+        project => {
+            id     => $project_id,
+            number => $project_number,
+            title  => $project_node->{title},
+        },
+        status_filter => (defined $status && $status ne '') ? $status : undef,
+        items    => \@formatted,
+        count    => scalar @formatted,
+        has_next_page => $page_info->{hasNextPage} ? JSON::true : JSON::false,
+        end_cursor    => $page_info->{endCursor} // undef,
+    };
+}
+
 # 20. github_project_add_item — Add an issue or PR to a GitHub Project V2
 sub tool_github_project_add_item {
     my ($args) = @_;
@@ -905,17 +1110,31 @@ sub tool_github_project_update_item {
     my $project_id  = $args->{project_id}  or die "Missing required: project_id";
     my $item_id     = $args->{item_id}     or die "Missing required: item_id";
     my $field_id    = $args->{field_id}    or die "Missing required: field_id";
-    my $value       = $args->{value}       // undef;
-    my $number      = $args->{number}      // undef;
-    my $text        = $args->{text}        // undef;
-    my $date        = $args->{date}        // undef;
-    my $option_id   = $args->{option_id}   // undef;
+    my $value        = $args->{value}        // undef;
+    my $number       = $args->{number}       // undef;
+    my $text         = $args->{text}         // undef;
+    my $date         = $args->{date}         // undef;
+    my $option_id    = $args->{option_id}    // undef;
     my $iteration_id = $args->{iteration_id} // undef;
 
-    # Build the value object based on what the user provided
+    # Determine which explicit fields were actually provided
+    my $has_option_id    = defined $option_id    && $option_id    ne '';
+    my $has_iteration_id = defined $iteration_id && $iteration_id ne '';
+    my $has_text         = defined $text         && $text         ne '';
+    my $has_date         = defined $date         && $date         ne '';
+    my $has_number       = defined $number && $number != 0;  # 0 is likely a JS/JSON default
+    my $has_value        = defined $value      && $value         ne '';
+
+    # Build the value object — explicit named fields take priority over generic $value
     my %value_obj = ();
-    if (defined $value) {
-        # Try to infer type
+    if ($has_option_id || $has_iteration_id || $has_text || $has_date || $has_number) {
+        $value_obj{singleSelectOptionId} = $option_id    if $has_option_id;
+        $value_obj{iterationId}         = $iteration_id if $has_iteration_id;
+        $value_obj{text}                = $text         if $has_text;
+        $value_obj{date}                = $date         if $has_date;
+        $value_obj{number}              = int($number)  if $has_number;
+    } elsif ($has_value) {
+        # Auto-inference from generic value (fallback only)
         if ($value =~ /^\d+$/) {
             $value_obj{number} = int($value);
         } elsif ($value =~ /^\d{4}-\d{2}-\d{2}$/) {
@@ -923,12 +1142,6 @@ sub tool_github_project_update_item {
         } else {
             $value_obj{text} = $value;
         }
-    } else {
-        $value_obj{number} = int($number) if defined $number;
-        $value_obj{text}   = $text        if defined $text;
-        $value_obj{date}   = $date        if defined $date;
-        $value_obj{singleSelectOptionId} = $option_id if defined $option_id;
-        $value_obj{iterationId} = $iteration_id if defined $iteration_id;
     }
 
     die "Nothing to update (provide value, number, text, date, option_id, or iteration_id)" unless keys %value_obj;
@@ -1532,6 +1745,21 @@ my %tool_handlers = (
                 number      => { type => "number", description => "Project number" },
                 owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
                 limit       => { type => "number", description => "Max items to list (default: 20)" },
+            },
+        },
+    },
+    github_project_search_items => {
+        description => "Search for items in a GitHub Project V2 by project name and optional status filter. Resolves project by title, then optionally filters by a Status field value (e.g. 'Backlog', 'In Progress', 'Done')",
+        handler     => \&tool_github_project_search_items,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "project"],
+            properties => {
+                owner       => { type => "string", description => "User or organization login" },
+                project     => { type => "string", description => "Project title (name) to search in" },
+                status      => { type => "string", description => "Filter by Status field value (e.g. 'Backlog', 'In Progress', 'Done'). Case-insensitive" },
+                owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
+                limit       => { type => "number", description => "Max items to return (default: 50)" },
             },
         },
     },
