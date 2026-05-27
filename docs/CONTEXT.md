@@ -42,8 +42,8 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 16 | `github_project_update` | Update Project V2 settings |
 | 17 | `github_project_delete` | Delete Project V2 |
 | 18 | `github_project_list_fields` | List fields in a Project V2 |
-| 19 | `github_project_list_items` | List items (issues/PRs) in a Project V2 |
-| 20 | `github_project_search_items` | Search items by project name and optional status filter (Backlog, In Progress, Done) |
+| 19 | `github_project_list_items` | List items (issues/PRs) in a Project V2 — supports `after` cursor, `status` filter, returns `end_cursor`/`has_next_page` |
+| 20 | `github_project_search_items` | Search items by project name and optional status filter (Backlog, In Progress, Done) — client-side filtering, supports `after` cursor |
 | 21 | `github_project_add_item` | Add existing issue/PR to a Project V2 |
 | 22 | `github_project_update_item` | Update field value on a Project V2 item |
 | 23 | `github_project_create_draft` | Create a draft issue in a Project V2 |

@@ -791,6 +791,8 @@ sub tool_github_project_list_items {
     my $number  = $args->{number}      or die "Missing required: number";
     my $limit   = $args->{limit}       // 20;
     my $type    = $args->{owner_type}  // 'auto';
+    my $after   = $args->{after}       // undef;   # cursor for pagination
+    my $status  = $args->{status}      // undef;   # optional status filter
 
     my $field = '';
     if ($type eq 'auto') {
@@ -804,11 +806,15 @@ sub tool_github_project_list_items {
         die "Invalid owner_type '$type'";
     }
 
+    # Include after cursor in query only when provided
+    my $has_after = defined $after && $after ne '';
+    my $after_arg = $has_after ? ', after: $after' : '';
+
     my $query = qq{
-        query(\$owner: String!, \$number: Int!, \$limit: Int!) {
+        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
             $field(login: \$owner) {
                 projectV2(number: \$number) {
-                    items(first: \$limit) {
+                    items(first: \$limit$after_arg) {
                         nodes {
                             id
                             content {
@@ -832,15 +838,68 @@ sub tool_github_project_list_items {
             }
         }
     };
-    my $res = _github_graphql($query, { owner => $owner, number => $number, limit => $limit });
+    my %vars = ( owner => $owner, number => $number, limit => $limit );
+    $vars{after} = $after if $has_after;
+    my $res = _github_graphql($query, \%vars);
     if ($res->{success} && $res->{data}{$field}{projectV2}) {
-        my $items = $res->{data}{$field}{projectV2}{items}{nodes} // [];
-        return { items => $items, count => scalar @$items };
+        my $raw_items = $res->{data}{$field}{projectV2}{items}{nodes} // [];
+        my $page_info = $res->{data}{$field}{projectV2}{items}{pageInfo};
+
+        # Format items with status extracted from fieldValues
+        my @formatted;
+        for my $item (@$raw_items) {
+            my $content = $item->{content} // {};
+            my $type = $content->{__typename} // 'Unknown';
+
+            # Extract Status from fieldValues
+            my $item_status = '';
+            my $field_values = $item->{fieldValues}{nodes} // [];
+            for my $fv (@$field_values) {
+                if ($fv->{field} && $fv->{field}{name} eq 'Status') {
+                    $item_status = $fv->{name} // '';
+                    last;
+                }
+            }
+
+            # Apply status filter if requested
+            if (defined $status && $status ne '') {
+                next unless lc($item_status) eq lc($status);
+            }
+
+            my $entry = { id => $item->{id}, type => $type, status => $item_status };
+
+            if ($type eq 'Issue') {
+                $entry->{title}  = $content->{title} // '';
+                $entry->{number} = $content->{number};
+                $entry->{state}  = $content->{state} // '';
+                $entry->{url}    = $content->{url} // '';
+                $entry->{repo}   = $content->{repository}{nameWithOwner} // '';
+            } elsif ($type eq 'PullRequest') {
+                $entry->{title}  = $content->{title} // '';
+                $entry->{number} = $content->{number};
+                $entry->{state}  = $content->{state} // '';
+                $entry->{url}    = $content->{url} // '';
+                $entry->{repo}   = $content->{repository}{nameWithOwner} // '';
+            } elsif ($type eq 'DraftIssue') {
+                $entry->{title}  = $content->{title} // '';
+                $entry->{body}   = $content->{body} // '';
+            }
+
+            push @formatted, $entry;
+        }
+
+        return {
+            items         => \@formatted,
+            count         => scalar @formatted,
+            has_next_page => $page_info->{hasNextPage} ? JSON::true : JSON::false,
+            end_cursor    => $page_info->{endCursor} // undef,
+        };
     }
     die "GraphQL error: " . ($res->{reason} // 'Failed to list items');
 }
 
 # 29. github_project_search_items — Find items in a Project V2 by name and optional status filter
+# Status filtering is done client-side (GraphQL filterBy is not supported on items).
 sub tool_github_project_search_items {
     my ($args) = @_;
     my $owner   = $args->{owner}       or die "Missing required: owner";
@@ -848,6 +907,7 @@ sub tool_github_project_search_items {
     my $status  = $args->{status}      // undef;
     my $limit   = $args->{limit}       // 50;
     my $type    = $args->{owner_type}  // 'auto';
+    my $after   = $args->{after}       // undef;   # cursor for pagination
 
     # Step 1: Resolve owner type
     my $field = '';
@@ -886,114 +946,48 @@ sub tool_github_project_search_items {
     my $project_id     = $project_node->{id};
     my $project_number = $project_node->{number};
 
-    # Step 3: If status filter is set, find the Status field and target option ID
-    my $field_id;
-    my $status_value;
+    # Step 3: Query items (without filterBy — not supported on items connection)
+    # Filter by status is done client-side below.
+    my $has_after = defined $after && $after ne '';
+    my $after_arg = $has_after ? ', after: $after' : '';
 
-    if (defined $status && $status ne '') {
-        my $fields_query = qq{
-            query(\$owner: String!, \$number: Int!, \$limit: Int!) {
-                $field(login: \$owner) {
-                    projectV2(number: \$number) {
-                        fields(first: \$limit) {
-                            nodes {
-                                ... on ProjectV2SingleSelectField {
-                                    __typename
-                                    id
-                                    name
-                                    options { id name }
-                                }
+    my $items_query = qq{
+        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
+            $field(login: \$owner) {
+                projectV2(number: \$number) {
+                    items(first: \$limit$after_arg) {
+                        nodes {
+                            id
+                            content {
+                                ... on Issue { __typename title number state url repository { nameWithOwner } }
+                                ... on PullRequest { __typename title number state url repository { nameWithOwner } }
+                                ... on DraftIssue { __typename title body }
                             }
-                        }
-                    }
-                }
-            }
-        };
-        my $fields_res = _github_graphql($fields_query, { owner => $owner, number => $project_number, limit => 50 });
-        die "GraphQL error listing fields: " . ($fields_res->{reason} // 'unknown') unless $fields_res->{success};
-
-        my $fields = $fields_res->{data}{$field}{projectV2}{fields}{nodes} // [];
-        my ($status_field) = grep { $_->{name} eq 'Status' } @$fields;
-        die "Project '$project' has no 'Status' field" unless $status_field;
-
-        $field_id = $status_field->{id};
-        my ($option) = grep { lc($_->{name}) eq lc($status) } @{$status_field->{options} // []};
-        die "Status value '$status' not found in Status field options" unless $option;
-
-        $status_value = $option->{id};
-    }
-
-    # Step 4: Query items with optional filterBy
-    my $items_query;
-    my $query_vars;
-
-    if (defined $field_id && defined $status_value) {
-        $items_query = qq{
-            query(\$owner: String!, \$number: Int!, \$limit: Int!, \$fieldId: ID!, \$statusValue: String!) {
-                $field(login: \$owner) {
-                    projectV2(number: \$number) {
-                        items(first: \$limit, filterBy: {fieldId: \$fieldId, operator: EQUALS, value: \$statusValue}) {
-                            nodes {
-                                id
-                                content {
-                                    ... on Issue { __typename title number state url repository { nameWithOwner } }
-                                    ... on PullRequest { __typename title number state url repository { nameWithOwner } }
-                                    ... on DraftIssue { __typename title body }
-                                }
-                                fieldValues(first: 8) {
-                                    nodes {
-                                        ... on ProjectV2ItemFieldSingleSelectValue {
-                                            field { ... on ProjectV2FieldCommon { id name } }
-                                            name
-                                        }
+                            fieldValues(first: 8) {
+                                nodes {
+                                    ... on ProjectV2ItemFieldSingleSelectValue {
+                                        field { ... on ProjectV2FieldCommon { id name } }
+                                        name
                                     }
                                 }
                             }
-                            pageInfo { hasNextPage endCursor }
                         }
+                        pageInfo { hasNextPage endCursor }
                     }
                 }
             }
-        };
-        $query_vars = { owner => $owner, number => $project_number, limit => $limit, fieldId => $field_id, statusValue => $status_value };
-    } else {
-        $items_query = qq{
-            query(\$owner: String!, \$number: Int!, \$limit: Int!) {
-                $field(login: \$owner) {
-                    projectV2(number: \$number) {
-                        items(first: \$limit) {
-                            nodes {
-                                id
-                                content {
-                                    ... on Issue { __typename title number state url repository { nameWithOwner } }
-                                    ... on PullRequest { __typename title number state url repository { nameWithOwner } }
-                                    ... on DraftIssue { __typename title body }
-                                }
-                                fieldValues(first: 8) {
-                                    nodes {
-                                        ... on ProjectV2ItemFieldSingleSelectValue {
-                                            field { ... on ProjectV2FieldCommon { id name } }
-                                            name
-                                        }
-                                    }
-                                }
-                            }
-                            pageInfo { hasNextPage endCursor }
-                        }
-                    }
-                }
-            }
-        };
-        $query_vars = { owner => $owner, number => $project_number, limit => $limit };
-    }
+        }
+    };
+    my %query_vars = ( owner => $owner, number => $project_number, limit => $limit );
+    $query_vars{after} = $after if $has_after;
 
-    my $items_res = _github_graphql($items_query, $query_vars);
+    my $items_res = _github_graphql($items_query, \%query_vars);
     die "GraphQL error listing items: " . ($items_res->{reason} // 'unknown') unless $items_res->{success};
 
     my $raw_items = $items_res->{data}{$field}{projectV2}{items}{nodes} // [];
     my $page_info = $items_res->{data}{$field}{projectV2}{items}{pageInfo};
 
-    # Format items with status extracted from fieldValues
+    # Format items with status extracted from fieldValues, applying client-side filter
     my @formatted;
     for my $item (@$raw_items) {
         my $content = $item->{content} // {};
@@ -1007,6 +1001,11 @@ sub tool_github_project_search_items {
                 $item_status = $fv->{name} // '';
                 last;
             }
+        }
+
+        # Apply client-side status filter
+        if (defined $status && $status ne '') {
+            next unless lc($item_status) eq lc($status);
         }
 
         my $entry = { id => $item->{id}, type => $type, status => $item_status };
@@ -1735,7 +1734,7 @@ my %tool_handlers = (
         },
     },
     github_project_list_items => {
-        description => "List items (issues, PRs, draft issues) in a GitHub Project V2",
+        description => "List items (issues, PRs, draft issues) in a GitHub Project V2. Supports cursor-based pagination and optional status filtering.",
         handler     => \&tool_github_project_list_items,
         inputSchema => {
             type => "object",
@@ -1744,12 +1743,14 @@ my %tool_handlers = (
                 owner       => { type => "string", description => "User or organization login" },
                 number      => { type => "number", description => "Project number" },
                 owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
-                limit       => { type => "number", description => "Max items to list (default: 20)" },
+                limit       => { type => "number", description => "Max items to list (default: 20, max: 100)" },
+                after       => { type => "string", description => "Cursor for pagination (from end_cursor of previous response)" },
+                status      => { type => "string", description => "Optional: filter by Status field value (e.g. 'Backlog', 'In Progress', 'Done'). Case-insensitive." },
             },
         },
     },
     github_project_search_items => {
-        description => "Search for items in a GitHub Project V2 by project name and optional status filter. Resolves project by title, then optionally filters by a Status field value (e.g. 'Backlog', 'In Progress', 'Done')",
+        description => "Search for items in a GitHub Project V2 by project name and optional status filter. Resolves project by title, then optionally filters by a Status field value (e.g. 'Backlog', 'In Progress', 'Done'). Filtering is client-side. Supports cursor-based pagination.",
         handler     => \&tool_github_project_search_items,
         inputSchema => {
             type => "object",
@@ -1759,7 +1760,8 @@ my %tool_handlers = (
                 project     => { type => "string", description => "Project title (name) to search in" },
                 status      => { type => "string", description => "Filter by Status field value (e.g. 'Backlog', 'In Progress', 'Done'). Case-insensitive" },
                 owner_type  => { type => "string", description => "Owner type: 'user', 'org', or 'auto' (default: auto)" },
-                limit       => { type => "number", description => "Max items to return (default: 50)" },
+                limit       => { type => "number", description => "Max items to return (default: 50, max: 100)" },
+                after       => { type => "string", description => "Cursor for pagination (from end_cursor of previous response)" },
             },
         },
     },
