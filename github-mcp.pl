@@ -811,7 +811,7 @@ sub tool_github_project_list_items {
     my $after_arg = $has_after ? ', after: $after' : '';
 
     my $query = qq{
-        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
+        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', $after: String!' : '')}) {
             $field(login: \$owner) {
                 projectV2(number: \$number) {
                     items(first: \$limit$after_arg) {
@@ -958,7 +958,7 @@ sub tool_github_project_search_items {
     my $after_arg = $has_after ? ', after: $after' : '';
 
     my $items_query = qq{
-        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
+        query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', $after: String!' : '')}) {
             $field(login: \$owner) {
                 projectV2(number: \$number) {
                     items(first: \$limit$after_arg) {
