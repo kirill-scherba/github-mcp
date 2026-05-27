@@ -808,7 +808,7 @@ sub tool_github_project_list_items {
 
     # Include after cursor in query only when provided
     my $has_after = defined $after && $after ne '';
-    my $after_arg = $has_after ? ', after: \$after' : '';
+    my $after_arg = $has_after ? ', after: $after' : '';
 
     my $query = qq{
         query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
@@ -955,7 +955,7 @@ sub tool_github_project_search_items {
     # Step 3: Query items (without filterBy — not supported on items connection)
     # Filter by status is done client-side below.
     my $has_after = defined $after && $after ne '';
-    my $after_arg = $has_after ? ', after: \$after' : '';
+    my $after_arg = $has_after ? ', after: $after' : '';
 
     my $items_query = qq{
         query(\$owner: String!, \$number: Int!, \$limit: Int!${\($has_after ? ', \$after: String!' : '')}) {
