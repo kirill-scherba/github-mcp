@@ -152,35 +152,34 @@ in a single call (unlike Projects V2 which required GraphQL for nested data acce
 **Why a separate tool instead of extending `github_project_list_items`:**
 - Accepts project **title** (human-readable) instead of opaque project number
 - Automatically resolves project by name across all user/organization projects
-- Uses GitHub GraphQL `filterBy` parameter for **server-side filtering** — no post-filtering in Perl
 - Returns consistently formatted items with extracted Status field value
+- Supports cursor-based pagination via `after` parameter
+
+**Status filtering is client-side:**
+GitHub GraphQL `ProjectV2.items` does **not** support the `filterBy` argument. Attempting to pass `filterBy: {fieldId, operator, value}` results in a GraphQL validation error (`Field 'items' doesn't accept argument 'filterBy'`). Instead, all items are fetched (without server-side filtering) and the status is compared client-side in Perl against the `Status` field value extracted from `fieldValues`. This works correctly but means pagination cursors reflect the unfiltered result set.
 
 **Workflow:**
 ```
-tools/call → github_project_search_items({owner, project, status?, limit?})
+tools/call → github_project_search_items({owner, project, status?, limit?, after?})
   → _github_graphql: list projects → find by title → get project number
-  → _github_graphql: list fields → find "Status" SingleSelect field → get option ID
-  → _github_graphql: items(first:N, filterBy: {fieldId, operator: EQUALS, value: optionId})
+  → _github_graphql: items(first:N, after:CURSOR) — no filterBy
+  → client-side: filter by status matching items with Status == $status
   → format items with {title, number, type, status, url, repo}
+  → return {items, count, has_next_page, end_cursor}
 ```
 
-**GraphQL filterBy support:**
-```graphql
-items(first: $limit, filterBy: {fieldId: $fieldId, operator: EQUALS, value: $statusValue}) {
-```
-This filters directly in the GitHub API — only items matching the status are returned, reducing data transfer and post-processing.
-
-**Status field resolution:**
-1. Query `fields` for the project, filter for `ProjectV2SingleSelectField` named "Status"
-2. Match the requested status value (case-insensitive) against option names
-3. Use the option's `id` (not name) as the filter value — GitHub requires option ID for single-select filters
+**Pagination support:**
+Both `github_project_list_items` and `github_project_search_items` support:
+- `limit` (up to 100) — number of items per page
+- `after` — cursor from previous response's `end_cursor`
+- Response includes `end_cursor` and `has_next_page` for pagination state
+- `status` parameter for filtering by Status field value (case-insensitive)
 
 ## Future Considerations
 
 - Add `github_create_repository` tool
 - Add `github_delete_repository` tool
 - Add rate limit checking (X-RateLimit-Remaining header)
-- Add pagination support for list operations
 - Add branch protection API tools
 - Add `github_project_remove_item` tool (deletes item from project)
 - Add `github_project_create_status_update` tool
