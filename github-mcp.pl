@@ -866,7 +866,13 @@ sub tool_github_project_list_items {
                 next unless lc($item_status) eq lc($status);
             }
 
-            my $entry = { id => $item->{id}, type => $type, status => $item_status };
+            my $entry = {
+                id          => $item->{id},
+                type        => $type,
+                status      => $item_status,
+                content     => $item->{content},
+                fieldValues => $item->{fieldValues},
+            };
 
             if ($type eq 'Issue') {
                 $entry->{title}  = $content->{title} // '';
@@ -1008,7 +1014,13 @@ sub tool_github_project_search_items {
             next unless lc($item_status) eq lc($status);
         }
 
-        my $entry = { id => $item->{id}, type => $type, status => $item_status };
+        my $entry = {
+            id          => $item->{id},
+            type        => $type,
+            status      => $item_status,
+            content     => $item->{content},
+            fieldValues => $item->{fieldValues},
+        };
 
         if ($type eq 'Issue') {
             $entry->{title}  = $content->{title} // '';
