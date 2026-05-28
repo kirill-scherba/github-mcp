@@ -688,6 +688,9 @@ sub tool_github_project_add_issue {
     # Resolve project node ID
     my $project_id = _resolve_project_node_id($project_owner, $project_number);
 
+    # Preflight: validate status before adding to project (no side effect yet)
+    my $status = _resolve_status_option_id($project_owner, $project_number, $project_status);
+
     # Add issue to project
     my $add_res = tool_github_project_add_item({
         project_id => $project_id,
@@ -696,7 +699,6 @@ sub tool_github_project_add_issue {
     my $item_id = $add_res->{id};
 
     # Set project status
-    my $status = _resolve_status_option_id($project_owner, $project_number, $project_status);
     tool_github_project_update_item({
         project_id => $project_id,
         item_id    => $item_id,
@@ -729,7 +731,12 @@ sub tool_github_issue_create_task {
     my $project_number  = $args->{project_number}  // 9;
     my $project_status  = $args->{project_status}  // 'Backlog';
 
-    # Step 1: Create the issue
+    # Step 1: Preflight — resolve project and validate status before creating issue
+    # (no side effects yet, so configuration/auth errors fail before any mutation)
+    my $project_id = _resolve_project_node_id($project_owner, $project_number);
+    my $status     = _resolve_status_option_id($project_owner, $project_number, $project_status);
+
+    # Step 2: Create the issue
     my $issue = tool_github_issue_create({
         owner     => $owner,
         repo      => $repo,
@@ -741,11 +748,8 @@ sub tool_github_issue_create_task {
 
     my $issue_number = $issue->{issue_number};
 
-    # Step 2: Resolve issue GraphQL node ID
+    # Step 3: Resolve issue GraphQL node ID
     my $content_id = _resolve_issue_node_id($owner, $repo, $issue_number);
-
-    # Step 3: Resolve project node ID
-    my $project_id = _resolve_project_node_id($project_owner, $project_number);
 
     # Step 4: Add issue to project
     my $add_res = tool_github_project_add_item({
@@ -755,7 +759,6 @@ sub tool_github_issue_create_task {
     my $item_id = $add_res->{id};
 
     # Step 5: Set project status
-    my $status = _resolve_status_option_id($project_owner, $project_number, $project_status);
     tool_github_project_update_item({
         project_id => $project_id,
         item_id    => $item_id,
