@@ -4,13 +4,13 @@
 [![MCP](https://img.shields.io/badge/MCP-2024--11--05-green.svg)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
-> **Standalone MCP server for GitHub API — 32 tools for issues, pull requests, files, search, labels, repositories, and projects.**
+> **Standalone MCP server for GitHub API — 34 tools for issues, pull requests, files, search, labels, repositories, and projects.**
 
 Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated MCP server for better separation of concerns. Uses direct `GITHUB_TOKEN` from environment — no sandbox limitations, full GitHub API access.
 
 ## Features
 
-- **32 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), pull requests (create, get, list, files, reviews, create review), files (get, create/update), search (issues, code), labels (list), repositories (list), projects V2 (list, get, create, update, delete, fields, items, add item, create draft, update item, add issue by number), task helpers (create task + attach to project, resolve issue node ID)
+- **34 GitHub API tools** — issues (CRUD + comments + list with multi-repo support), pull requests (create, get, list, files, reviews, create review, merge), files (get, create/update), search (issues, code), labels (list), repositories (list), projects V2 (list, get, create, update, delete, fields, items, add item, create draft, update item, search items, add issue by number), task helpers (create task + attach to project, resolve issue node ID, resolve PR review threads)
 - **Direct authentication** — `GITHUB_TOKEN` from environment variable, no Safe sandbox limitations
 - **Clean JSON-RPC 2.0** — MCP protocol over stdin/stdout
 - **Structured logging** — all logs to stderr, stdout clean for JSON-RPC
@@ -39,6 +39,7 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 | `github_project_delete` | Delete a Project V2 |
 | `github_project_list_fields` | List fields in a Project V2 |
 | `github_project_list_items` | List items in a Project V2 |
+| `github_project_search_items` | Search items by project name and optional status filter |
 | `github_project_add_item` | Add an existing issue, PR, or draft issue to a Project V2 |
 | `github_project_create_draft` | Create a draft issue in a Project V2 |
 | `github_project_update_item` | Update a field value on a Project V2 item |
@@ -48,9 +49,11 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 | `github_pull_request_list_reviews` | List reviews and line-level review comments on a PR |
 | `github_pull_request_create_review` | Create a PR review (APPROVE/REQUEST_CHANGES/COMMENT) |
 | `github_pull_request_create` | Create a pull request (title, head, base, optional body/draft) |
+| `github_pull_request_merge` | Merge a pull request and delete the source branch |
 | `github_resolve_issue_node_id` | Resolve issue GraphQL node ID by owner/repo/issue_number |
 | `github_project_add_issue` | Add existing issue to Project V2 by owner/repo/issue_number (no manual GraphQL) |
 | `github_issue_create_task` | Create task issue and attach to Project V2 in one workflow |
+| `github_resolve_thread` | Resolve a PR review conversation thread via GraphQL |
 
 ### List GitHub Projects V2
 
