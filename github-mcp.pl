@@ -556,6 +556,230 @@ sub _resolve_owner {
     die "Could not resolve owner '$owner' to a user or organization";
 }
 
+# Helper: resolve status option ID for a given project and status name.
+# Queries project Status field and finds the matching option by name (case-insensitive).
+# Returns { field_id, option_id, option_name } on success.
+sub _resolve_status_option_id {
+    my ($owner, $project_number, $status_name) = @_;
+
+    my $field = '';
+    (my $t, undef) = _resolve_owner($owner);
+    $field = $t;
+
+    my $query = qq{
+        query(\$owner: String!, \$number: Int!) {
+            \$field(login: \$owner) {
+                projectV2(number: \$number) {
+                    field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                            id
+                            options { id name }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    # Dynamically substitute field name since GraphQL doesn't support field name variables
+    $query =~ s/\$field/$field/g;
+
+    my $res = _github_graphql($query, { owner => $owner, number => $project_number });
+    die "Failed to query project fields: " . ($res->{reason} // 'unknown') unless $res->{success};
+
+    my $status_field = $res->{data}{$field}{projectV2}{field};
+    die "Project #$project_number has no Status field" unless $status_field && $status_field->{options};
+
+    my $field_id = $status_field->{id};
+    my @options = @{$status_field->{options}};
+    my ($matched) = grep { lc($_->{name}) eq lc($status_name) } @options;
+    die "Status '$status_name' not found in project #$project_number (available: " . join(', ', map { $_->{name} } @options) . ")" unless $matched;
+
+    return {
+        field_id    => $field_id,
+        option_id   => $matched->{id},
+        option_name => $matched->{name},
+    };
+}
+
+# Helper: resolve issue GraphQL node ID by owner/repo/issue_number.
+sub _resolve_issue_node_id {
+    my ($owner, $repo, $issue_number) = @_;
+
+    my $query = qq{
+        query(\$owner: String!, \$repo: String!, \$number: Int!) {
+            repository(owner: \$owner, name: \$repo) {
+                issue(number: \$number) {
+                    id
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, {
+        owner  => $owner,
+        repo   => $repo,
+        number => $issue_number,
+    });
+    die "Failed to resolve issue node ID: " . ($res->{reason} // 'unknown') unless $res->{success};
+    my $node_id = $res->{data}{repository}{issue}{id};
+    die "Issue #$issue_number not found in $owner/$repo" unless $node_id;
+    return $node_id;
+}
+
+# Helper: resolve project node ID by owner and project number.
+sub _resolve_project_node_id {
+    my ($owner, $project_number) = @_;
+
+    my $field = '';
+    (my $t, undef) = _resolve_owner($owner);
+    $field = $t;
+
+    my $query = qq{
+        query(\$owner: String!, \$number: Int!) {
+            \$field(login: \$owner) {
+                projectV2(number: \$number) {
+                    id
+                }
+            }
+        }
+    };
+    $query =~ s/\$field/$field/g;
+
+    my $res = _github_graphql($query, { owner => $owner, number => $project_number });
+    die "Failed to resolve project node ID: " . ($res->{reason} // 'unknown') unless $res->{success};
+    my $node_id = $res->{data}{$field}{projectV2}{id};
+    die "Project #$project_number not found for owner '$owner'" unless $node_id;
+    return $node_id;
+}
+
+# ============================================================================
+# New Task/Project Helper Tools
+# ============================================================================
+
+# 30. github_resolve_issue_node_id — Resolve issue GraphQL node ID
+sub tool_github_resolve_issue_node_id {
+    my ($args) = @_;
+    my $owner        = $args->{owner}        or die "Missing required: owner";
+    my $repo         = $args->{repo}         or die "Missing required: repo";
+    my $issue_number = $args->{issue_number} or die "Missing required: issue_number";
+
+    my $node_id = _resolve_issue_node_id($owner, $repo, $issue_number);
+    return {
+        node_id     => $node_id,
+        owner       => $owner,
+        repo        => $repo,
+        issue_number => $issue_number,
+    };
+}
+
+# 31. github_project_add_issue — Add an existing issue to a GitHub Project V2
+# by owner/repo/issue_number (no manual GraphQL node ID required).
+sub tool_github_project_add_issue {
+    my ($args) = @_;
+    my $owner           = $args->{owner}           or die "Missing required: owner";
+    my $repo            = $args->{repo}            or die "Missing required: repo";
+    my $issue_number    = $args->{issue_number}    or die "Missing required: issue_number";
+    my $project_owner   = $args->{project_owner}   // 'kirill-scherba';
+    my $project_number  = $args->{project_number}  // 9;
+    my $project_status  = $args->{project_status}  // 'Backlog';
+
+    # Resolve issue node ID
+    my $content_id = _resolve_issue_node_id($owner, $repo, $issue_number);
+
+    # Resolve project node ID
+    my $project_id = _resolve_project_node_id($project_owner, $project_number);
+
+    # Preflight: validate status before adding to project (no side effect yet)
+    my $status = _resolve_status_option_id($project_owner, $project_number, $project_status);
+
+    # Add issue to project
+    my $add_res = tool_github_project_add_item({
+        project_id => $project_id,
+        content_id => $content_id,
+    });
+    my $item_id = $add_res->{id};
+
+    # Set project status
+    tool_github_project_update_item({
+        project_id => $project_id,
+        item_id    => $item_id,
+        field_id   => $status->{field_id},
+        option_id  => $status->{option_id},
+    });
+
+    return {
+        issue_url       => "https://github.com/$owner/$repo/issues/$issue_number",
+        issue_number    => $issue_number,
+        project_id      => $project_id,
+        project_item_id => $item_id,
+        project_owner   => $project_owner,
+        project_number  => $project_number,
+        project_status  => $status->{option_name},
+    };
+}
+
+# 32. github_issue_create_task — Create a task issue and attach it to a
+# GitHub Project V2 board in one workflow.
+sub tool_github_issue_create_task {
+    my ($args) = @_;
+    my $owner           = $args->{owner}           or die "Missing required: owner";
+    my $repo            = $args->{repo}            or die "Missing required: repo";
+    my $title           = $args->{title}           or die "Missing required: title";
+    my $body            = $args->{body}            // '';
+    my $labels          = $args->{labels}          // undef;
+    my $assignees       = $args->{assignees}       // undef;
+    my $project_owner   = $args->{project_owner}   // 'kirill-scherba';
+    my $project_number  = $args->{project_number}  // 9;
+    my $project_status  = $args->{project_status}  // 'Backlog';
+
+    # Step 1: Preflight — resolve project and validate status before creating issue
+    # (no side effects yet, so configuration/auth errors fail before any mutation)
+    my $project_id = _resolve_project_node_id($project_owner, $project_number);
+    my $status     = _resolve_status_option_id($project_owner, $project_number, $project_status);
+
+    # Step 2: Create the issue
+    my $issue = tool_github_issue_create({
+        owner     => $owner,
+        repo      => $repo,
+        title     => $title,
+        body      => $body,
+        labels    => $labels,
+        assignees => $assignees,
+    });
+
+    my $issue_number = $issue->{issue_number};
+
+    # Step 3: Resolve issue GraphQL node ID
+    my $content_id = _resolve_issue_node_id($owner, $repo, $issue_number);
+
+    # Step 4: Add issue to project
+    my $add_res = tool_github_project_add_item({
+        project_id => $project_id,
+        content_id => $content_id,
+    });
+    my $item_id = $add_res->{id};
+
+    # Step 5: Set project status
+    tool_github_project_update_item({
+        project_id => $project_id,
+        item_id    => $item_id,
+        field_id   => $status->{field_id},
+        option_id  => $status->{option_id},
+    });
+
+    return {
+        issue_url       => $issue->{issue_url},
+        issue_number    => $issue_number,
+        title           => $issue->{title},
+        state           => $issue->{state},
+        issue_node_id   => $content_id,
+        project_id      => $project_id,
+        project_item_id => $item_id,
+        project_owner   => $project_owner,
+        project_number  => $project_number,
+        project_status  => $status->{option_name},
+    };
+}
+
 # 13. github_project_list — List GitHub Projects V2 for user or organization
 sub tool_github_project_list {
     my ($args) = @_;
@@ -1818,6 +2042,57 @@ my %tool_handlers = (
                 date          => { type => "string", description => "Date value YYYY-MM-DD (overrides value)" },
                 option_id     => { type => "string", description => "Single select option ID (overrides value)" },
                 iteration_id  => { type => "string", description => "Iteration ID (overrides value)" },
+            },
+        },
+    },
+
+    # === Task / Project Helper Tools ===
+
+    github_resolve_issue_node_id => {
+        description => "Resolve a GitHub issue's GraphQL node ID by owner/repo/issue_number",
+        handler     => \&tool_github_resolve_issue_node_id,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "issue_number"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                issue_number => { type => "number", description => "Issue number" },
+            },
+        },
+    },
+    github_project_add_issue => {
+        description => "Add an existing issue to a GitHub Project V2 by owner/repo/issue_number without requiring manual GraphQL node IDs. Sets the project status to Backlog by default.",
+        handler     => \&tool_github_project_add_issue,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "issue_number"],
+            properties => {
+                owner           => { type => "string", description => "Repository owner (user or org)" },
+                repo            => { type => "string", description => "Repository name" },
+                issue_number    => { type => "number", description => "Issue number" },
+                project_owner   => { type => "string", description => "Project owner (default: kirill-scherba)" },
+                project_number  => { type => "number", description => "Project number (default: 9 — Matrica)" },
+                project_status  => { type => "string", description => "Project status to set (default: Backlog)" },
+            },
+        },
+    },
+    github_issue_create_task => {
+        description => "Create a task issue and attach it to GitHub Project V2 Matrica board in one workflow. Creates the issue, resolves its GraphQL node ID, adds to project, and sets project status.",
+        handler     => \&tool_github_issue_create_task,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "title"],
+            properties => {
+                owner           => { type => "string", description => "Repository owner (user or org)" },
+                repo            => { type => "string", description => "Repository name" },
+                title           => { type => "string", description => "Issue title" },
+                body            => { type => "string", description => "Issue body (optional)" },
+                labels          => { type => "array",  items => { type => "string" }, description => "Label names (optional)" },
+                assignees       => { type => "array",  items => { type => "string" }, description => "Usernames to assign (optional)" },
+                project_owner   => { type => "string", description => "Project owner (default: kirill-scherba)" },
+                project_number  => { type => "number", description => "Project number (default: 9 — Matrica)" },
+                project_status  => { type => "string", description => "Project status to set (default: Backlog)" },
             },
         },
     },

@@ -175,6 +175,42 @@ Both `github_project_list_items` and `github_project_search_items` support:
 - Response includes `end_cursor` and `has_next_page` for pagination state
 - `status` parameter for filtering by Status field value (case-insensitive)
 
+### 11. Task and Project Helper Tools (added 2026-05-28)
+
+Three high-level tools that simplify the workflow of creating issues and attaching them to GitHub Project V2 boards:
+
+**`github_resolve_issue_node_id`** — Resolves the GraphQL node ID of any issue by owner/repo/issue_number. Uses the `_resolve_issue_node_id` helper which executes a simple GraphQL query against the repository's issue field. Returned node ID can be used with `github_project_add_item` or any other GraphQL-based tool that requires content IDs.
+
+**`github_project_add_issue`** — Adds an existing issue to a Project V2 board without requiring the caller to supply a GraphQL node ID. Accepts owner/repo/issue_number plus optional project_owner (default: `kirill-scherba`), project_number (default: `9` — Matrica), and project_status (default: `Backlog`). Internally:
+1. Resolves issue GraphQL node ID via `_resolve_issue_node_id`
+2. Resolves project node ID via `_resolve_project_node_id`
+3. Adds issue to project via existing `addProjectV2ItemById` mutation
+4. Resolves status option ID via `_resolve_status_option_id` (queries project fields for the Status single-select field, matches option by name)
+5. Sets the project item status via existing `updateProjectV2ItemFieldValue` mutation
+
+**`github_issue_create_task`** — Complete end-to-end workflow in a single tool call:
+1. Creates the issue via existing `github_issue_create` tool (REST API)
+2. Resolves the issue's GraphQL node ID
+3. Resolves the target project node ID
+4. Adds the issue to the project
+5. Sets the project status
+6. Returns issue URL, issue number, issue node ID, project item ID, and final board status
+
+**New helper functions:**
+- `_resolve_status_option_id($owner, $project_number, $status_name)` — Queries the project's Status field using `projectV2.field(name: "Status")` GraphQL API, finds the matching option by name (case-insensitive), returns `{ field_id, option_id, option_name }`.
+- `_resolve_issue_node_id($owner, $repo, $issue_number)` — Simple GraphQL query to get issue node ID.
+- `_resolve_project_node_id($owner, $project_number)` — Resolves a project V2 node ID from owner + number.
+
+**Default project configuration:**
+```perl
+my $project_owner  = 'kirill-scherba';  # Default project owner
+my $project_number = 9;                 # Default project (Matrica)
+my $project_status = 'Backlog';         # Default status for new tasks
+```
+
+**Design decision — composition over duplication:**
+The new tools reuse existing tool handler subroutines directly (e.g., `tool_github_issue_create`, `tool_github_project_add_item`, `tool_github_project_update_item`) rather than duplicating their logic. This ensures that fixes to the low-level tools automatically benefit the high-level helpers.
+
 ## Future Considerations
 
 - Add `github_create_repository` tool
