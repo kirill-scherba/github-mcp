@@ -211,6 +211,37 @@ my $project_status = 'Backlog';         # Default status for new tasks
 **Design decision — composition over duplication:**
 The new tools reuse existing tool handler subroutines directly (e.g., `tool_github_issue_create`, `tool_github_project_add_item`, `tool_github_project_update_item`) rather than duplicating their logic. This ensures that fixes to the low-level tools automatically benefit the high-level helpers.
 
+### 12. PR Review Thread Resolution (added 2026-05-28)
+
+`github_resolve_thread` (tool #33) enables AI orchestrators to automatically resolve PR review conversation threads after fixes have been applied. Uses the GitHub GraphQL mutation `resolveReviewThread`:
+
+```graphql
+mutation($threadId: ID!) {
+    resolveReviewThread(input: { threadId: $threadId }) {
+        thread { id isResolved }
+    }
+}
+```
+
+**Why GraphQL not REST:** GitHub REST API does not expose a dedicated endpoint for resolving review threads. The `POST /repos/{o}/{r}/pulls/{n}/reviews/{review_id}/dismissals` endpoint only dismisses entire reviews, not individual threads. The GraphQL `resolveReviewThread` mutation is the only way to resolve individual conversation threads.
+
+**Companion to `github_pull_request_create_review`:**
+This tool completes the PR review lifecycle:
+1. `github_pull_request_create_review` creates reviews with comments
+2. After comments are addressed and fixes committed, `github_resolve_thread` marks each resolved thread as resolved
+
+**Error handling:**
+- Already-resolved threads: GitHub returns a GraphQL error which is surfaced with a descriptive message
+- Invalid thread IDs: GraphQL returns an error that is propagated to the caller
+- Network/token errors: Handled by `_github_graphql`'s standard error handling
+
+**Tool interface:**
+```
+tools/call → github_resolve_thread({ thread_id: "TIR_..." })
+  → _github_graphql(resolveReviewThread mutation, { threadId })
+  → return { success, thread_id, is_resolved }
+```
+
 ## Future Considerations
 
 - Add `github_create_repository` tool

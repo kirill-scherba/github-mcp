@@ -5,7 +5,7 @@
 # Repository: github.com/kirill-scherba/github-mcp
 #
 # Features:
-#   - 27 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
+#   - 28 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
 #   - Direct GITHUB_TOKEN from environment (no Safe sandbox limitations)
 #   - JSON-RPC 2.0 over stdin/stdout (MCP protocol)
 #   - Detailed logging to stderr
@@ -1705,9 +1705,40 @@ sub tool_github_pull_request_create {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
+# 29. github_resolve_thread — Resolve a PR review conversation thread via GraphQL
+sub tool_github_resolve_thread {
+    my ($args) = @_;
+    my $thread_id = $args->{thread_id} or die "Missing required: thread_id";
+
+    my $query = <<'EOF';
+    mutation($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+            thread {
+                id
+                isResolved
+            }
+        }
+    }
+EOF
+    my $res = _github_graphql($query, { threadId => $thread_id });
+
+    if ($res->{success} && $res->{data}{resolveReviewThread}{thread}) {
+        my $thread = $res->{data}{resolveReviewThread}{thread};
+        return {
+            success     => JSON::true,
+            thread_id   => $thread->{id},
+            is_resolved => $thread->{isResolved} ? JSON::true : JSON::false,
+        };
+    }
+
+    # Surface GraphQL errors (already resolved, invalid thread ID, etc.)
+    my $reason = $res->{reason} // 'Failed to resolve review thread';
+    die "GitHub API error: $reason";
+}
+
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list (28 tools: 12 issue/search/file + 10 project
-# + 6 pull request)
+# Tool definitions for tools/list (33 tools: 12 issue/search/file + 10 project
+# + 11 pull request / review)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
     github_issue_create => {
@@ -2197,6 +2228,17 @@ my %tool_handlers = (
                 base  => { type => "string", description => "Base branch name (target)" },
                 body  => { type => "string", description => "Pull request body / description (optional)" },
                 draft => { type => "boolean", description => "Create as draft PR (optional, default: false)" },
+            },
+        },
+    },
+    github_resolve_thread => {
+        description => "Resolve a PR review conversation thread via the GitHub GraphQL API. Accepts a thread_id (GraphQL node ID, e.g. TIR_...) and marks the thread as resolved. Returns success/failure with the thread status. Handles already-resolved threads and invalid thread IDs with descriptive error messages.",
+        handler     => \&tool_github_resolve_thread,
+        inputSchema => {
+            type => "object",
+            required => ["thread_id"],
+            properties => {
+                thread_id => { type => "string", description => "GraphQL node ID of the review thread to resolve (e.g. TIR_...)" },
             },
         },
     },
