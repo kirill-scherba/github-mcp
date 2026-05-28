@@ -5,7 +5,7 @@
 # Repository: github.com/kirill-scherba/github-mcp
 #
 # Features:
-#   - 28 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
+#   - 34 GitHub API tools (issues, PRs, files, search, repos, labels, projects)
 #   - Direct GITHUB_TOKEN from environment (no Safe sandbox limitations)
 #   - JSON-RPC 2.0 over stdin/stdout (MCP protocol)
 #   - Detailed logging to stderr
@@ -1736,9 +1736,92 @@ EOF
     die "GitHub API error: $reason";
 }
 
+# 34. github_pull_request_merge — Merge a PR and delete the source branch
+sub tool_github_pull_request_merge {
+    my ($args) = @_;
+    my $owner          = $args->{owner}          or die "Missing required: owner";
+    my $repo           = $args->{repo}           or die "Missing required: repo";
+    my $pull_number    = $args->{pull_number}    or die "Missing required: pull_number";
+    my $merge_method   = $args->{merge_method}   // 'merge';
+    my $commit_title   = $args->{commit_title}   // undef;
+    my $commit_message = $args->{commit_message} // undef;
+
+    # Step 1: Fetch PR details to get head branch name and source repo
+    my $pr_res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number");
+    die "GitHub API error fetching PR: " . ($pr_res->{reason} // "HTTP $pr_res->{status}") unless $pr_res->{success};
+
+    my $pr_data     = $pr_res->{data};
+    my $head_branch = $pr_data->{head}{ref};
+    my $pr_url      = $pr_data->{html_url} // "https://github.com/$owner/$repo/pull/$pull_number";
+
+    # Determine the source repo for branch deletion
+    # For fork PRs, head.repo differs from base repo; for same-repo PRs they match.
+    my $head_repo_owner = $pr_data->{head}{repo}{owner}{login}  // $owner;
+    my $head_repo_name  = $pr_data->{head}{repo}{name}           // $repo;
+    my $head_repo_full  = $pr_data->{head}{repo}{full_name}      // "$owner/$repo";
+
+    # Validate merge_method
+    my %valid_methods = map { $_ => 1 } qw(merge squash rebase);
+    die "Invalid merge_method '$merge_method'. Valid: merge, squash, rebase" unless $valid_methods{$merge_method};
+
+    # Step 2: Perform merge
+    my %merge_payload = (merge_method => $merge_method);
+    $merge_payload{commit_title}   = $commit_title   if defined $commit_title;
+    $merge_payload{commit_message} = $commit_message if defined $commit_message;
+
+    my $body_str = $json->encode(\%merge_payload);
+    my $merge_res = _github_api("PUT", "/repos/$owner/$repo/pulls/$pull_number/merge", $body_str);
+
+    unless ($merge_res->{success}) {
+        # Surface specific GitHub error messages for common failure modes
+        my $reason = $merge_res->{reason} // "HTTP $merge_res->{status}";
+        my $status = $merge_res->{status};
+
+        # Check for specific error conditions
+        if ($status eq '405') {
+            die "Pull request #$pull_number cannot be merged (already merged, or merge not allowed): $reason";
+        }
+        if ($status eq '409') {
+            die "Pull request #$pull_number has merge conflicts and cannot be merged: $reason";
+        }
+        if ($status eq '404') {
+            die "Pull request #$pull_number not found in $owner/$repo: $reason";
+        }
+        die "GitHub API error merging PR #$pull_number: $reason";
+    }
+
+    my $merge_data = $merge_res->{data};
+    my $merged     = $merge_data->{merged} // 0;
+    my $message    = $merge_data->{message} // '';
+    my $sha        = $merge_data->{sha} // '';
+
+    # Step 3: Delete source branch from the PR head repository (only on successful merge)
+    # Uses pull.head.repo (which differs from base repo for fork PRs).
+    my $branch_deleted = 0;
+    my $deleted_branch = $head_branch;
+    if ($merged) {
+        my $delete_res = _github_api("DELETE", "/repos/$head_repo_owner/$head_repo_name/git/refs/heads/$head_branch");
+        if ($delete_res->{success}) {
+            $branch_deleted = 1;
+        } else {
+            # Branch deletion failure is non-fatal — log and report in response
+            log_message("WARN", "Failed to delete branch '$head_branch' from $head_repo_full after merge: " . ($delete_res->{reason} // "HTTP $delete_res->{status}"));
+        }
+    }
+
+    return {
+        merged         => ($merged ? JSON::true : JSON::false),
+        message        => $message,
+        sha            => $sha,
+        pr_url         => $pr_url,
+        branch_deleted => ($branch_deleted ? JSON::true : JSON::false),
+        deleted_branch => $deleted_branch,
+    };
+}
+
 # ---------------------------------------------------------------------------
-# Tool definitions for tools/list (33 tools: 12 issue/search/file + 10 project
-# + 11 pull request / review)
+# Tool definitions for tools/list (34 tools: 12 issue/search/file + 10 project
+# + 12 pull request / review / merge)
 # ---------------------------------------------------------------------------
 my %tool_handlers = (
     github_issue_create => {
@@ -2239,6 +2322,22 @@ my %tool_handlers = (
             required => ["thread_id"],
             properties => {
                 thread_id => { type => "string", description => "GraphQL node ID of the review thread to resolve (e.g. TIR_...)" },
+            },
+        },
+    },
+    github_pull_request_merge => {
+        description => "Merge a pull request and delete the source branch. Merges via GitHub API and always deletes the source branch afterwards.",
+        handler     => \&tool_github_pull_request_merge,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number"],
+            properties => {
+                owner          => { type => "string", description => "Repository owner (user or org)" },
+                repo           => { type => "string", description => "Repository name" },
+                pull_number    => { type => "number", description => "Pull request number" },
+                merge_method   => { type => "string", description => "Merge method: merge (default), squash, rebase" },
+                commit_title   => { type => "string", description => "Custom commit title (optional)" },
+                commit_message => { type => "string", description => "Custom commit message (optional)" },
             },
         },
     },

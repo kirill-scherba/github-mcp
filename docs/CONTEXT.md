@@ -2,7 +2,7 @@
 
 ## What is github-mcp?
 
-GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 28 GitHub API tools (18 REST + 10 GraphQL) via MCP protocol.
+GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 34 GitHub API tools via MCP protocol — issues, pull requests (including merge), files, search, labels, repositories, Projects V2 (GraphQL), task helpers, and PR review thread resolution.
 
 ## Why it exists
 
@@ -20,7 +20,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **Protocol:** MCP over stdin/stdout (JSON-RPC 2.0)
 - **Auth:** `GITHUB_TOKEN` environment variable
 
-## Tools (33)
+## Tools (34)
 
 | # | Tool | Purpose |
 | --- | ------ | --------- |
@@ -57,6 +57,7 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 | 31 | `github_project_add_issue` | Add existing issue to Project V2 by owner/repo/issue_number (no manual GraphQL) |
 | 32 | `github_issue_create_task` | Create task issue and attach to Project V2 in one workflow |
 | 33 | `github_resolve_thread` | Resolve a PR review conversation thread via GraphQL — accepts `thread_id` (e.g. `TIR_...`), returns success/failure with `is_resolved` status |
+| 34 | `github_pull_request_merge` | Merge a pull request and delete the source branch — supports merge/squash/rebase methods, always deletes source branch |
 
 ## History
 
@@ -72,3 +73,4 @@ ai-hub grew too large — mixing utility tools, MCP hub, and GitHub API in one c
 - **2026-05-24:** Added `github_project_search_items` tool (#29) — search items by project title and optional Status field filter (Backlog, In Progress, Done). Resolves project by name automatically, uses GraphQL `filterBy` for server-side filtering.
 - **2026-05-28:** Added 3 high-level task/project helper tools (#10): `github_resolve_issue_node_id` (GraphQL node ID resolution), `github_project_add_issue` (add existing issue to project by repo/issue number), `github_issue_create_task` (create issue + attach to Project V2 in one call).
 - **2026-05-28:** Added `github_resolve_thread` tool (#14) — resolves PR review conversation threads via `resolveReviewThread` GraphQL mutation. Accepts `thread_id` (e.g. `TIR_...`), returns success/failure with thread resolved status. Surface GraphQL errors for already-resolved threads and invalid thread IDs.
+- **2026-05-28:** Added `github_pull_request_merge` tool (#17) — merges a PR via `PUT /pulls/{n}/merge` with merge/squash/rebase methods and automatically deletes the source branch on success. Fetches PR to get head branch name, validates merge_method, handles conflict/not-mergeable/already-merged errors with descriptive messages.

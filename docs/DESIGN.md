@@ -51,7 +51,7 @@ Implements:
 
 - `initialize` — returns protocol version + server capabilities
 - `ping` — health check
-- `tools/list` — returns all 28 tool definitions with JSON Schema
+- `tools/list` — returns all 34 tool definitions with JSON Schema
 - `tools/call` — dispatches to tool handler, catches errors
 
 Error handling:
@@ -125,9 +125,9 @@ All Projects V2 tools (10 tools total) use `_github_graphql`. One tool (`github_
 
 **Known GraphQL schema fix (2026-05-23):** The `github_project_list_fields` query referenced `ProjectV2DateField` and `ProjectV2NumberField` types that no longer exist in the GitHub GraphQL schema — removed. The `github_project_update_item` response query used `option { name }` on `ProjectV2ItemFieldSingleSelectValue` — corrected to `name` (the `option` wrapper field was removed from the schema).
 
-### 9. Pull Request Tools (added 2026-05-23)
+### 9. Pull Request Tools (added 2026-05-23, expanded 2026-05-28)
 
-Six PR tools were added using the GitHub REST API:
+Seven PR tools were added using the GitHub REST API:
 
 - `github_pull_request_get` — uses `GET /repos/{o}/{r}/pulls/{n}` for full PR metadata
 - `github_pull_request_list` — uses `GET /repos/{o}/{r}/pulls` with state/head/base/sort/direction filters
@@ -135,6 +135,7 @@ Six PR tools were added using the GitHub REST API:
 - `github_pull_request_list_reviews` — uses `GET /repos/{o}/{r}/pulls/{n}/reviews` for review history and `GET /repos/{o}/{r}/pulls/{n}/comments` for line-level review comments
 - `github_pull_request_create_review` — uses `POST /repos/{o}/{r}/pulls/{n}/reviews` with body, event, and optional line comments
 - `github_pull_request_create` — uses `POST /repos/{o}/{r}/pulls` to create a PR with title, head, base (required) and optional body/draft
+- `github_pull_request_merge` — uses `PUT /repos/{o}/{r}/pulls/{n}/merge` to merge a PR with configurable merge_method (merge/squash/rebase) and optional commit_title/commit_message. On success, automatically deletes the source branch from `pull.head.repo` (supports fork PRs by deleting from the head repo rather than unconditionally from the base repo). Error handling surfaces HTTP 405 (already merged), 409 (conflict), and 404 (not found) with descriptive messages. Branch deletion failure is non-fatal and logged as a warning.
 
 **Graceful degradation:** The create_review tool detects 401/403 responses and returns a descriptive error
 with required token scopes instead of a generic failure. REST API validation errors preserve the GitHub
