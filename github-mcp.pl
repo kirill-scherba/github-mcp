@@ -1746,12 +1746,19 @@ sub tool_github_pull_request_merge {
     my $commit_title   = $args->{commit_title}   // undef;
     my $commit_message = $args->{commit_message} // undef;
 
-    # Step 1: Fetch PR details to get head branch name
+    # Step 1: Fetch PR details to get head branch name and source repo
     my $pr_res = _github_api("GET", "/repos/$owner/$repo/pulls/$pull_number");
     die "GitHub API error fetching PR: " . ($pr_res->{reason} // "HTTP $pr_res->{status}") unless $pr_res->{success};
 
-    my $head_branch = $pr_res->{data}{head}{ref};
-    my $pr_url      = $pr_res->{data}{html_url} // "https://github.com/$owner/$repo/pull/$pull_number";
+    my $pr_data     = $pr_res->{data};
+    my $head_branch = $pr_data->{head}{ref};
+    my $pr_url      = $pr_data->{html_url} // "https://github.com/$owner/$repo/pull/$pull_number";
+
+    # Determine the source repo for branch deletion
+    # For fork PRs, head.repo differs from base repo; for same-repo PRs they match.
+    my $head_repo_owner = $pr_data->{head}{repo}{owner}{login}  // $owner;
+    my $head_repo_name  = $pr_data->{head}{repo}{name}           // $repo;
+    my $head_repo_full  = $pr_data->{head}{repo}{full_name}      // "$owner/$repo";
 
     # Validate merge_method
     my %valid_methods = map { $_ => 1 } qw(merge squash rebase);
@@ -1788,16 +1795,17 @@ sub tool_github_pull_request_merge {
     my $message    = $merge_data->{message} // '';
     my $sha        = $merge_data->{sha} // '';
 
-    # Step 3: Delete source branch (only on successful merge)
+    # Step 3: Delete source branch from the PR head repository (only on successful merge)
+    # Uses pull.head.repo (which differs from base repo for fork PRs).
     my $branch_deleted = 0;
     my $deleted_branch = $head_branch;
     if ($merged) {
-        my $delete_res = _github_api("DELETE", "/repos/$owner/$repo/git/refs/heads/$head_branch");
+        my $delete_res = _github_api("DELETE", "/repos/$head_repo_owner/$head_repo_name/git/refs/heads/$head_branch");
         if ($delete_res->{success}) {
             $branch_deleted = 1;
         } else {
             # Branch deletion failure is non-fatal — log and report in response
-            log_message("WARN", "Failed to delete branch '$head_branch' after merge: " . ($delete_res->{reason} // "HTTP $delete_res->{status}"));
+            log_message("WARN", "Failed to delete branch '$head_branch' from $head_repo_full after merge: " . ($delete_res->{reason} // "HTTP $delete_res->{status}"));
         }
     }
 

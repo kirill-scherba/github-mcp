@@ -2,7 +2,7 @@
 
 ## What is github-mcp?
 
-GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 28 GitHub API tools (18 REST + 10 GraphQL) via MCP protocol.
+GitHub MCP server extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicated standalone server. Provides 34 GitHub API tools via MCP protocol — issues, pull requests (including merge), files, search, labels, repositories, Projects V2 (GraphQL), task helpers, and PR review thread resolution.
 
 ## Why it exists
 
