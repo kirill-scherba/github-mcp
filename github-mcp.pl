@@ -281,7 +281,8 @@ sub tool_github_issue_update {
     $payload{title}     = $args->{title}     if defined $args->{title};
     $payload{body}      = $args->{body}      if defined $args->{body};
     $payload{state}     = $args->{state}     if defined $args->{state};
-    $payload{labels}    = $args->{labels}    if defined $args->{labels};
+    # DO NOT add labels here — use github_issue_add_labels / github_issue_remove_labels instead
+    # $payload{labels} = $args->{labels} if defined $args->{labels};
     $payload{assignees} = $args->{assignees} if defined $args->{assignees};
 
     die "Nothing to update" unless scalar keys %payload;
@@ -297,6 +298,64 @@ sub tool_github_issue_update {
         };
     }
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
+# 4b. github_issue_add_labels
+sub tool_github_issue_add_labels {
+    my ($args) = @_;
+    my $owner  = $args->{owner}        or die "Missing required: owner";
+    my $repo   = $args->{repo}         or die "Missing required: repo";
+    my $number = $args->{issue_number} or die "Missing required: issue_number";
+    my $new_labels = $args->{labels}   or die "Missing required: labels";
+    $new_labels = [ $new_labels ] unless ref $new_labels eq 'ARRAY';
+
+    # Read current labels
+    my $res = _github_api("GET", "/repos/$owner/$repo/issues/$number");
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}") unless $res->{success};
+    my %current = map { $_ => 1 } map { $_->{name} } @{$res->{data}{labels} // []};
+
+    # Add new labels (no duplicates)
+    for my $l (@$new_labels) { $current{$l} = 1; }
+    my @merged = sort keys %current;
+
+    # Update via PATCH
+    my $body_str = $json->encode({ labels => \@merged });
+    my $upd = _github_api("PATCH", "/repos/$owner/$repo/issues/$number", $body_str);
+    die "GitHub API error: " . ($upd->{reason} // "HTTP $upd->{status}") unless $upd->{success};
+
+    return {
+        added  => $new_labels,
+        labels => [map { $_->{name} } @{$upd->{data}{labels} // []}],
+    };
+}
+
+# 4c. github_issue_remove_labels
+sub tool_github_issue_remove_labels {
+    my ($args) = @_;
+    my $owner  = $args->{owner}        or die "Missing required: owner";
+    my $repo   = $args->{repo}         or die "Missing required: repo";
+    my $number = $args->{issue_number} or die "Missing required: issue_number";
+    my $remove_labels = $args->{labels} or die "Missing required: labels";
+    $remove_labels = [ $remove_labels ] unless ref $remove_labels eq 'ARRAY';
+
+    # Read current labels
+    my $res = _github_api("GET", "/repos/$owner/$repo/issues/$number");
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}") unless $res->{success};
+
+    # Build remove set (case-insensitive)
+    my %remove = map { lc($_) => 1 } @$remove_labels;
+    my @remaining = grep { !$remove{lc($_->{name})} } @{$res->{data}{labels} // []};
+    my @remaining_names = map { $_->{name} } @remaining;
+
+    # Update via PATCH
+    my $body_str = $json->encode({ labels => \@remaining_names });
+    my $upd = _github_api("PATCH", "/repos/$owner/$repo/issues/$number", $body_str);
+    die "GitHub API error: " . ($upd->{reason} // "HTTP $upd->{status}") unless $upd->{success};
+
+    return {
+        removed => $remove_labels,
+        labels  => [map { $_->{name} } @{$upd->{data}{labels} // []}],
+    };
 }
 
 # 5. github_issue_add_comment
@@ -1872,7 +1931,7 @@ my %tool_handlers = (
         },
     },
     github_issue_update => {
-        description => "Update a GitHub issue (title, body, state, labels, assignees)",
+        description => "Update a GitHub issue (title, body, state, assignees). For label changes use github_issue_add_labels / github_issue_remove_labels.",
         handler     => \&tool_github_issue_update,
         inputSchema => {
             type => "object",
@@ -1884,8 +1943,36 @@ my %tool_handlers = (
                 title        => { type => "string", description => "New title (optional)" },
                 body         => { type => "string", description => "New body text (optional)" },
                 state        => { type => "string", description => "New state: open or closed (optional)" },
-                labels       => { type => "array",  items => { type => "string" }, description => "New labels array (optional)" },
+                # labels deliberately excluded — use github_issue_add_labels / github_issue_remove_labels
                 assignees    => { type => "array",  items => { type => "string" }, description => "New assignees array (optional)" },
+            },
+        },
+    },
+    github_issue_add_labels => {
+        description => "Add labels to a GitHub issue without removing existing ones (incremental). Reads current labels, merges new ones, updates.",
+        handler     => \&tool_github_issue_add_labels,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "issue_number", "labels"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                issue_number => { type => "number", description => "Issue number" },
+                labels       => { type => "array", items => { type => "string" }, description => "Labels to add (each must be a string)" },
+            },
+        },
+    },
+    github_issue_remove_labels => {
+        description => "Remove labels from a GitHub issue without affecting other labels (incremental). Reads current labels, removes specified ones, updates.",
+        handler     => \&tool_github_issue_remove_labels,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "issue_number", "labels"],
+            properties => {
+                owner        => { type => "string", description => "Repository owner (user or org)" },
+                repo         => { type => "string", description => "Repository name" },
+                issue_number => { type => "number", description => "Issue number" },
+                labels       => { type => "array", items => { type => "string" }, description => "Labels to remove (each must be a string, case-insensitive)" },
             },
         },
     },
