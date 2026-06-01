@@ -660,6 +660,30 @@ sub _resolve_status_option_id {
     };
 }
 
+# Helper: resolve pull request GraphQL node ID by owner/repo/pull_number.
+sub _resolve_pull_request_node_id {
+    my ($owner, $repo, $pull_number) = @_;
+
+    my $query = qq{
+        query(\$owner: String!, \$repo: String!, \$number: Int!) {
+            repository(owner: \$owner, name: \$repo) {
+                pullRequest(number: \$number) {
+                    id
+                }
+            }
+        }
+    };
+    my $res = _github_graphql($query, {
+        owner  => $owner,
+        repo   => $repo,
+        number => $pull_number,
+    });
+    die "Failed to resolve pull request node ID: " . ($res->{reason} // 'unknown') unless $res->{success};
+    my $node_id = $res->{data}{repository}{pullRequest}{id};
+    die "Pull request #$pull_number not found in $owner/$repo" unless $node_id;
+    return $node_id;
+}
+
 # Helper: resolve issue GraphQL node ID by owner/repo/issue_number.
 sub _resolve_issue_node_id {
     my ($owner, $repo, $issue_number) = @_;
@@ -768,6 +792,53 @@ sub tool_github_project_add_issue {
     return {
         issue_url       => "https://github.com/$owner/$repo/issues/$issue_number",
         issue_number    => $issue_number,
+        project_id      => $project_id,
+        project_item_id => $item_id,
+        project_owner   => $project_owner,
+        project_number  => $project_number,
+        project_status  => $status->{option_name},
+    };
+}
+
+# 31b. github_project_add_pull_request — Add an existing pull request to a
+# GitHub Project V2 by owner/repo/pull_number (no manual GraphQL node ID
+# required).
+sub tool_github_project_add_pull_request {
+    my ($args) = @_;
+    my $owner           = $args->{owner}           or die "Missing required: owner";
+    my $repo            = $args->{repo}            or die "Missing required: repo";
+    my $pull_number     = $args->{pull_number}     or die "Missing required: pull_number";
+    my $project_owner   = $args->{project_owner}   // 'kirill-scherba';
+    my $project_number  = $args->{project_number}  // 9;
+    my $project_status  = $args->{project_status}  // 'In review';
+
+    # Resolve pull request node ID
+    my $content_id = _resolve_pull_request_node_id($owner, $repo, $pull_number);
+
+    # Resolve project node ID
+    my $project_id = _resolve_project_node_id($project_owner, $project_number);
+
+    # Preflight: validate status before adding to project (no side effect yet)
+    my $status = _resolve_status_option_id($project_owner, $project_number, $project_status);
+
+    # Add pull request to project
+    my $add_res = tool_github_project_add_item({
+        project_id => $project_id,
+        content_id => $content_id,
+    });
+    my $item_id = $add_res->{id};
+
+    # Set project status
+    tool_github_project_update_item({
+        project_id => $project_id,
+        item_id    => $item_id,
+        field_id   => $status->{field_id},
+        option_id  => $status->{option_id},
+    });
+
+    return {
+        pr_url          => "https://github.com/$owner/$repo/pull/$pull_number",
+        pull_number     => $pull_number,
         project_id      => $project_id,
         project_item_id => $item_id,
         project_owner   => $project_owner,
@@ -2275,6 +2346,22 @@ my %tool_handlers = (
                 project_owner   => { type => "string", description => "Project owner (default: kirill-scherba)" },
                 project_number  => { type => "number", description => "Project number (default: 9 — Matrica)" },
                 project_status  => { type => "string", description => "Project status to set (default: Backlog)" },
+            },
+        },
+    },
+    github_project_add_pull_request => {
+        description => "Add an existing pull request to a GitHub Project V2 by owner/repo/pull_number without requiring manual GraphQL node IDs. Sets the project status to In review by default.",
+        handler     => \&tool_github_project_add_pull_request,
+        inputSchema => {
+            type => "object",
+            required => ["owner", "repo", "pull_number"],
+            properties => {
+                owner           => { type => "string", description => "Repository owner (user or org)" },
+                repo            => { type => "string", description => "Repository name" },
+                pull_number     => { type => "number", description => "Pull request number" },
+                project_owner   => { type => "string", description => "Project owner (default: kirill-scherba)" },
+                project_number  => { type => "number", description => "Project number (default: 9 — Matrica)" },
+                project_status  => { type => "string", description => "Project status to set (default: In review)" },
             },
         },
     },
