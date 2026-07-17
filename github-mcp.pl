@@ -589,6 +589,36 @@ sub tool_github_list_repos {
     die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
 }
 
+# ---------------------------------------------------------------------------
+# Tool: github_repo_create
+# ---------------------------------------------------------------------------
+sub tool_github_repo_create {
+    my ($args) = @_;
+    my $name        = $args->{name}        or die "Missing required: name";
+    my $description = $args->{description} // '';
+    my $is_private  = $args->{private}     // 0;
+    my $org         = $args->{org}         // undef;
+
+    my $payload = { name => $name, description => $description, private => ($is_private ? JSON::true : JSON::false) };
+    my $body = $json->encode($payload);
+
+    my $path = $org ? "/orgs/$org/repos" : "/user/repos";
+    my $res = _github_api("POST", $path, $body);
+    if ($res->{success}) {
+        my $r = $res->{data};
+        return {
+            full_name   => $r->{full_name},
+            description => $r->{description} // '',
+            private     => $r->{private} // 0,
+            html_url    => $r->{html_url},
+            clone_url   => $r->{clone_url},
+            ssh_url     => $r->{ssh_url},
+            git_url     => $r->{git_url},
+        };
+    }
+    die "GitHub API error: " . ($res->{reason} // "HTTP $res->{status}");
+}
+
 # ============================================================================
 # GitHub Projects V2 Tools (GraphQL API)
 # ============================================================================
@@ -2155,6 +2185,20 @@ my %tool_handlers = (
                 type  => { type => "string", description => "Type: owner, public, private, all (default: owner)" },
                 org   => { type => "string", description => "Organization name (optional, omit for user repos)" },
                 limit => { type => "number", description => "Max results (default: 30)" },
+            },
+        },
+    },
+    github_repo_create => {
+        description => "Create a new GitHub repository",
+        handler     => \&tool_github_repo_create,
+        inputSchema => {
+            type => "object",
+            required => ["name"],
+            properties => {
+                name        => { type => "string", description => "Repository name" },
+                description => { type => "string", description => "Repository description (optional)" },
+                private     => { type => "boolean", description => "Private repository (default: false)" },
+                org         => { type => "string", description => "Organization name (optional, creates under user if omitted)" },
             },
         },
     },
