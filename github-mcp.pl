@@ -125,7 +125,7 @@ sub _github_api {
         # Extract GitHub API error details from response body
         my $reason = $data->{message} // "HTTP $http_code";
         if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
-            my @msgs = map { $_->{message} // $_->{code} // '' } @{$data->{errors}};
+            my @msgs = map { ref $_ eq 'HASH' ? ($_->{message} // $_->{code} // '') : ($_ // '') } @{$data->{errors}};
             $reason .= ': ' . join('; ', grep { $_ } @msgs) if @msgs;
         }
         return { success => 0, status => $http_code, data => $data, reason => $reason };
@@ -1786,9 +1786,11 @@ sub tool_github_pull_request_create_review {
         my $data = $res->{data};
         if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
             for my $err (@{$data->{errors}}) {
-                my $msg = $err->{message} // '';
-                if ($msg =~ /owned by you/i) {
-                    die "GitHub does not allow approving your own pull request. "
+                my $msg = ref $err eq 'HASH'
+                    ? ($err->{message} // $err->{code} // '')
+                    : ($err // '');
+                if ($msg =~ /owned by you/i || $msg =~ /request changes on own/i) {
+                    die "GitHub does not allow approving or requesting changes on your own pull request. "
                         . "Use event=COMMENT to leave a comment instead, or ask another user to review.";
                 }
             }
