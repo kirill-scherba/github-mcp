@@ -1756,7 +1756,9 @@ sub tool_github_pull_request_create_review {
         my $data = $res->{data};
         if ($data->{errors} && ref $data->{errors} eq 'ARRAY') {
             for my $err (@{$data->{errors}}) {
-                my $msg = $err->{message} // '';
+                my $msg = ref $err eq 'HASH'
+                    ? ($err->{message} // $err->{code} // '')
+                    : ($err // '');
                 if ($msg =~ /owned by you/i || $msg =~ /request changes on own/i) {
                     die "GitHub does not allow approving or requesting changes on your own pull request. "
                         . "Use event=COMMENT to leave a comment instead, or ask another user to review.";
