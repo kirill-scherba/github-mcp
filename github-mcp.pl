@@ -51,7 +51,7 @@ my $json = JSON->new->allow_nonref;
 sub respond {
     my ($id, $result) = @_;
     my $response = { jsonrpc => "2.0", id => $id, result => $result };
-    print $json->encode($response) . "\n";
+    print _bytes($json->encode($response)) . "\n";
     STDOUT->flush();
 }
 
@@ -60,7 +60,7 @@ sub respond_error {
     my $error = { code => $code, message => $message };
     $error->{data} = $data if defined $data;
     my $response = { jsonrpc => "2.0", id => $id, error => $error };
-    print $json->encode($response) . "\n";
+    print _bytes($json->encode($response)) . "\n";
     STDOUT->flush();
 }
 
@@ -68,12 +68,22 @@ sub send_notification {
     my ($method, $params) = @_;
     my $notification = { jsonrpc => "2.0", method => $method };
     $notification->{params} = $params if defined $params;
-    print $json->encode($notification) . "\n";
+    print _bytes($json->encode($notification)) . "\n";
     STDOUT->flush();
     log_message("INFO", "Notification: $method");
 }
 
 our $json_pp_decoder = JSON->new->allow_nonref;
+
+# Perl strings that came from JSON are character strings: Cyrillic in a file body or a commit message
+# makes print and encode_base64 die with "Wide character in subroutine entry". Everything that leaves
+# this program - a request body, a base64 payload, a response line - goes through here as UTF-8 bytes.
+sub _bytes {
+    my $s = shift;
+    return $s unless defined $s;
+    utf8::encode($s) if utf8::is_utf8($s);
+    return $s;
+}
 
 # ---------------------------------------------------------------------------
 # GitHub API helpers
@@ -95,7 +105,7 @@ sub _github_api {
     if (defined $body) {
         my $tmp = "/tmp/_github_body_$$.json";
         open(my $fh, '>', $tmp) or return { success => 0, status => 0, reason => "Cannot write temp file: $!" };
-        print $fh $body;
+        print $fh _bytes($body);
         close $fh;
         $body_arg = "--data-binary \@'$tmp'";
     }
@@ -451,7 +461,7 @@ sub tool_github_create_or_update_file {
     my $branch  = $args->{branch}  // undef;
     my $sha     = $args->{sha}     // undef;
 
-    my $encoded = encode_base64($content, '');
+    my $encoded = encode_base64(_bytes($content), '');
     my %payload = (message => $message, content => $encoded);
     $payload{branch} = $branch if $branch;
     $payload{sha}    = $sha    if $sha;
