@@ -1,0 +1,30 @@
+{
+  "name": "github-mcp",
+  "title": {
+    "ru": "GitHub",
+    "en": "GitHub"
+  },
+  "description": {
+    "ru": "GitHub: репозитории, issues, pull requests, проекты, поиск кода. Внутри — Perl.",
+    "en": "GitHub: repos, issues, pull requests, projects, code search. Perl inside."
+  },
+  "category": "dev",
+  "install": "binary",
+  "command": [
+    "github-mcp"
+  ],
+  "entries": {
+    "linux-amd64": "github-mcp",
+    "windows-amd64": "github-mcp.exe"
+  },
+  "settings": [
+    {
+      "key": "GITHUB_TOKEN",
+      "label": "personal access token",
+      "hint": "GitHub → Settings → Developer settings → Tokens",
+      "required": true,
+      "secret": true
+    }
+  ],
+  "docs": "https://github.com/kirill-scherba/github-mcp#install-in-anytext"
+}
