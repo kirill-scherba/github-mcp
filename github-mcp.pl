@@ -14,8 +14,27 @@
 use strict;
 use warnings;
 use utf8;
-use JSON;
+# JSON::PP is core Perl: the server also runs inside the embedded interpreter (go-perl), where a CPAN
+# module is not available. The API used here is identical.
+use JSON::PP;
+
+# JSON.pm used to alias its booleans into the JSON:: namespace; JSON::PP keeps them in JSON::PP.
+# Two one-line subs keep every call site untouched.
+sub JSON::true  { JSON::PP::true() }
+sub JSON::false { JSON::PP::false() }
 use POSIX qw(strftime);
+use File::Spec;
+
+# Temp directory and the curl binary come from the host when it says so: a Unix Perl inside the
+# embedded interpreter mangles Windows paths, and Windows has no /bin/sh for backticks.
+my $TMPDIR = $ENV{GITHUB_MCP_TMPDIR} || File::Spec->tmpdir() || '/tmp';
+$TMPDIR =~ s{[/\\]+$}{};
+my $CURL = ($^O =~ /MSWin32/i) ? 'curl.exe' : 'curl';
+
+sub _tmp_path {
+    my ($name) = @_;
+    return "$TMPDIR/$name";
+}
 use MIME::Base64;
 
 use English '-no_match_vars';
@@ -46,7 +65,7 @@ sub log_message {
 # ---------------------------------------------------------------------------
 # JSON-RPC helpers
 # ---------------------------------------------------------------------------
-my $json = JSON->new->allow_nonref;
+my $json = JSON::PP->new->allow_nonref;
 
 sub respond {
     my ($id, $result) = @_;
@@ -73,7 +92,7 @@ sub send_notification {
     log_message("INFO", "Notification: $method");
 }
 
-our $json_pp_decoder = JSON->new->allow_nonref;
+our $json_pp_decoder = JSON::PP->new->allow_nonref;
 
 # Perl strings that came from JSON are character strings: Cyrillic in a file body or a commit message
 # makes print and encode_base64 die with "Wide character in subroutine entry". Everything that leaves
@@ -100,28 +119,40 @@ sub _github_api {
 
     log_message("DEBUG", "_github_api: $method $url");
 
-    my $body_arg = '';
-    my $header_arg = '-s';
+    my @args = ('-X', $method, '-H', 'Accept: application/vnd.github+json', '-H', 'User-Agent: github-mcp/1.0');
+    push @args, '-H', "Authorization: Bearer $token" if $token;
+    my $tmp;
     if (defined $body) {
-        my $tmp = "/tmp/_github_body_$$.json";
+        $tmp = _tmp_path("_github_body_$$.json");
         open(my $fh, '>', $tmp) or return { success => 0, status => 0, reason => "Cannot write temp file: $!" };
         print $fh _bytes($body);
         close $fh;
-        $body_arg = "--data-binary \@'$tmp'";
+        push @args, '-H', 'Content-Type: application/json', '--data-binary', "\@$tmp";
     }
-    if ($token) {
-        $header_arg .= " -H 'Authorization: Bearer $token' -H 'Accept: application/vnd.github+json' -H 'User-Agent: github-mcp/1.0'";
+    # The HTTP code arrives in the headers: the body is written to a file, and a child's stdout is lost
+    # inside the embedded interpreter.
+    my $hdr = _tmp_path("_github_hdr_$$.txt");
+    my @cmd = ($CURL, '-s', @args, '--output', _tmp_path("_github_resp_$$.json"), '--dump-header', $hdr,
+               '--connect-timeout', '10', '--max-time', '30', $url);
+    my $rc = system(@cmd);
+    my $exit_code = $rc >> 8;
+
+    my $result = '';
+    my $bodyfile = _tmp_path("_github_resp_$$.json");
+    if (-f $bodyfile) {
+        open(my $bf, '<', $bodyfile) or return { success => 0, status => 0, reason => "Cannot read response: $!" };
+        $result = do { local $/; <$bf> } // '';
+        close $bf;
+        unlink $bodyfile;
     }
-    $header_arg .= ' -H ' . (defined $body ? "'Content-Type: application/json'" : "'Accept: application/vnd.github+json'");
-
-    my $result = `curl -s -w '%{http_code}' -X $method $header_arg $body_arg --connect-timeout 10 --max-time 30 '$url' 2>/dev/null`;
-    unlink "/tmp/_github_body_$$.json" if defined $body && -f "/tmp/_github_body_$$.json";
-
     my $http_code = '';
-    if (length($result) >= 3) {
-        $http_code = substr($result, -3, 3);
-        $result = substr($result, 0, -3);
+    if (open(my $hf, '<', $hdr)) {
+        my $status_line = <$hf> // '';
+        close $hf;
+        $http_code = $1 if $status_line =~ m{^HTTP/\S+\s+(\d+)};
     }
+    unlink $hdr if -f $hdr;
+    unlink $tmp if defined $tmp && -f $tmp;
     $http_code =~ s/\s+//g;
     log_message("DEBUG", "_github_api: HTTP $http_code, response_len=" . length($result));
 
@@ -157,13 +188,27 @@ sub _github_graphql {
     $payload->{variables} = $variables if $variables;
     my $body = $json->encode($payload);
 
-    my $tmp = "/tmp/_github_gql_body_$$.json";
+    my $tmp = _tmp_path("_github_gql_body_$$.json");
     open(my $fh, '>', $tmp) or return { success => 0, reason => "Cannot write temp file: $!" };
     print $fh $body;
     close $fh;
 
-    my $cmd = "curl -s -X POST -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -H 'User-Agent: github-mcp/1.0' --connect-timeout 10 --max-time 30 --data-binary \@'$tmp' '$url' 2>/dev/null";
-    my $result = `$cmd`;
+    my $out = _tmp_path("_github_gql_resp_$$.json");
+    my @cmd = ($CURL, '-s', '-X', 'POST',
+        '-H', "Authorization: Bearer $token",
+        '-H', 'Content-Type: application/json',
+        '-H', 'User-Agent: github-mcp/1.0',
+        '--data-binary', "\@$tmp",
+        '--output', $out,
+        '--connect-timeout', '10', '--max-time', '30', $url);
+    system(@cmd);
+    my $result = '';
+    if (-f $out) {
+        open(my $of, '<', $out) or return { success => 0, reason => "Cannot read response: $!" };
+        $result = do { local $/; <$of> } // '';
+        close $of;
+        unlink $out;
+    }
     unlink $tmp if -f $tmp;
 
     my $data = eval { $json_pp_decoder->decode($result) };

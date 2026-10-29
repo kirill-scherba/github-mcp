@@ -1,0 +1,62 @@
+# Release: a tag builds github-mcp for both platforms and attaches the archives to a GitHub release.
+#
+# The server is Perl, but the artifact is a single binary: the interpreter is compiled into it
+# (go-perl), so a machine needs neither Perl nor CPAN. That is the whole point - the same server runs on
+# Linux and on Windows from one downloadable file.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            goos: linux
+            binary: github-mcp
+          - platform: windows-amd64
+            goos: windows
+            binary: github-mcp.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Perl syntax check
+        run: perl -c github-mcp.pl
+
+      - name: Build and pack
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          go build -trimpath -ldflags "-s -w" -o "${{ matrix.binary }}" ./cmd/github-mcp
+          zip="github-mcp_${tag}_${{ matrix.platform }}.zip"
+          # The Perl interpreter inside the binary is distributed under the Artistic License, so its
+          # notices travel with it: a release without LICENSES/ would be a redistribution of Perl
+          # with the license stripped off.
+          zip -q "$zip" "${{ matrix.binary }}" LICENSE THIRD-PARTY-NOTICES.md LICENSES/Artistic-1.0.txt LICENSES/GPL-1.0.txt
+          sha256sum "$zip" > "$zip.sha256"
+          cat "$zip.sha256"
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ZIP }}
+            ${{ env.ZIP }}.sha256
