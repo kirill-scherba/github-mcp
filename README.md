@@ -88,7 +88,8 @@ Extracted from [ai-hub](https://github.com/kirill-scherba/ai-hub) into a dedicat
 ### Prerequisites
 
 ```bash
-# Perl modules (JSON is in core since 5.38+)
+# Perl modules: JSON comes from CPAN (JSON::PP is core, but the server asks for JSON)
+sudo cpan JSON
 # curl for GitHub API calls
 sudo apt install curl   # Debian/Ubuntu
 sudo pacman -S curl     # Arch Linux
@@ -303,7 +304,14 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 
 ## License
 
-MIT © Kirill Scherba
+BSD 3-Clause © Kirill Scherba — see [LICENSE](LICENSE).
+
+The server runs on the Perl interpreter you already have; Perl keeps its own license and is not
+distributed here. Running this script through it does not make the script a derivative work of the
+interpreter, so nothing in a program that starts this server is affected by Perl's terms.
+
+GitHub is a trademark of GitHub, Inc. This server is an independent, unofficial client of the
+GitHub API and is not affiliated with GitHub, Inc.
 
 ---
 
